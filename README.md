@@ -1,135 +1,85 @@
 # WaveQL
 
 <p align="center">
-  <strong>Query APIs using SQL — An open-source alternative to CData</strong>
+  <img src="assets/logo.png" width="200" alt="WaveQL Logo" />
 </p>
 
 <p align="center">
-  <a href="#features">Features</a> •
-  <a href="#installation">Installation</a> •
-  <a href="#quick-start">Quick Start</a> •
-  <a href="#adapters">Adapters</a> •
-  <a href="#documentation">Documentation</a>
+  <strong>The Universal SQL Connector for Modern APIs</strong><br>
+  <em>Query ServiceNow, Salesforce, Jira, and more using standard SQL.</em>
+</p>
+
+<p align="center">
+  <a href="https://pypi.org/project/waveql/"><img src="https://img.shields.io/pypi/v/waveql?color=00d4ff&style=flat-square" alt="PyPI"></a>
+  <a href="https://github.com/mitayan0/WaveQL/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License"></a>
+  <a href="#"><img src="https://img.shields.io/badge/python-3.9+-3776ab?style=flat-square&logo=python&logoColor=white" alt="Python Version"></a>
+  <a href="#"><img src="https://img.shields.io/badge/async-supported-green?style=flat-square" alt="Async Support"></a>
 </p>
 
 ---
 
-**WaveQL** is a Python library that lets you query REST APIs using standard SQL. It translates SQL queries into optimized API calls with predicate pushdown, handles pagination automatically, and returns results as Arrow tables for high-performance analytics.
+**WaveQL** transforms the way you interact with SaaS APIs. Instead of wrestling with complex, proprietary REST endpoints and pagination logic, WaveQL lets you query your business data using the language you already know: **SQL**.
 
-## Features
+Built for data engineers and developers, it translates your SQL queries into optimized API calls (pushing down predicates like `WHERE` and `ORDER BY`), handles authentications, and returns high-performance **Arrow** or **Pandas** dataframes.
 
-- 🔌 **Multiple Adapters**: ServiceNow, Salesforce, Jira, REST APIs, CSV/Parquet files
-- ⚡ **Predicate Pushdown**: SQL WHERE clauses are pushed to APIs (JQL, SOQL, ServiceNow Query)
-- 🔄 **Aggregation Pushdown**: COUNT, SUM, AVG pushed to source when supported
-- 🔗 **Cross-Source JOINs**: Join data across different APIs using DuckDB
-- 🔐 **Authentication**: OAuth2, API Keys, Basic Auth via AuthManager
-- 🚀 **Async Support**: Full async/await support for non-blocking I/O
-- 🏊 **Connection Pooling**: Thread-safe HTTP session reuse
-- 📊 **SQLAlchemy Dialect**: Use with Pandas, Superset, and other tools
-- 🎯 **DB-API 2.0 Compliant**: Standard Python database interface
+## 🚀 Why WaveQL?
 
-## Installation
+*   **🔌 Universal Adapter System**: Connect to ServiceNow, Salesforce, Jira, or generic REST APIs with a unified interface.
+*   **⚡ Intelligent Query Pushdown**: We don't just fetch all data. `WHERE` clauses are translated into native API filters (e.g., JQL, SOQL) for maximum performance.
+*   **🔄 Cross-Source JOINs**: Seamlessly join data between your local CSVs, a Jira backlog, and ServiceNow incidents using our DuckDB-powered engine.
+*   **⚡ Async Built-in**: Built on `httpx` and `anyio` for high-concurrency, non-blocking applications.
+*   **🐼 Data Science Ready**: Native integrations with Pandas, PyArrow, and SQLAlchemy (works with Superset!).
+
+## 📦 Installation
 
 ```bash
-# From GitHub
-pip install git+https://github.com/mitayan0/WaveQL.git
+pip install waveql
+```
 
-# Or clone and install locally
+Or install from source:
+
+```bash
 git clone https://github.com/mitayan0/WaveQL.git
 cd WaveQL
 pip install -e .
 ```
 
-### Requirements
+## ⚡ Quick Start
 
-- Python 3.9+
-- requests, httpx, pyarrow, duckdb, sqlalchemy, anyio
-
-## Quick Start
-
-### ServiceNow
+### 1. Querying ServiceNow
 
 ```python
-from waveql import connect
+import waveql
 
-# Connect to ServiceNow
-conn = connect(
-    "servicenow://your-instance.service-now.com",
+# Connect securely
+conn = waveql.connect(
+    "servicenow://instance.service-now.com",
     username="admin",
     password="your-password"
 )
 
-# Query incidents
+# Execute standard SQL
 cursor = conn.cursor()
 cursor.execute("""
     SELECT number, short_description, priority 
     FROM incident 
-    WHERE state = 1 
-    LIMIT 100
+    WHERE state = 1 AND priority <= 2
+    ORDER BY number DESC
+    LIMIT 10
 """)
 
-# Fetch results
+# Work with results
 for row in cursor:
-    print(row)
+    print(f"[{row.number}] {row.short_description}")
 
-# Or convert to pandas
+# Or get a Pandas DataFrame instantly
 df = cursor.fetchall().to_df()
+print(df.head())
 ```
 
-### Salesforce
+### 2. Async Support
 
-```python
-from waveql import connect
-
-conn = connect(
-    "salesforce://login.salesforce.com",
-    client_id="your_client_id",
-    client_secret="your_client_secret",
-    username="user@example.com",
-    password="password+security_token"
-)
-
-cursor = conn.cursor()
-cursor.execute("SELECT Id, Name, Industry FROM Account WHERE Industry = 'Technology'")
-accounts = cursor.fetchall()
-```
-
-### Jira
-
-```python
-from waveql import connect
-
-conn = connect(
-    "jira://your-domain.atlassian.net",
-    username="email@example.com",
-    password="your-api-token"
-)
-
-cursor = conn.cursor()
-cursor.execute("""
-    SELECT key, summary, status, assignee 
-    FROM issues 
-    WHERE project = 'PROJ' AND status = 'Open'
-""")
-issues = cursor.fetchall()
-```
-
-### Cross-Source JOIN
-
-```python
-# Join ServiceNow incidents with Jira issues
-conn.execute("""
-    SELECT 
-        sn.number as incident,
-        jira.key as issue,
-        sn.short_description
-    FROM servicenow.incident sn
-    JOIN jira.issues jira ON sn.correlation_id = jira.key
-    WHERE sn.state = 1
-""")
-```
-
-### Async Support
+Building a modern FastAPI or async app? We've got you covered.
 
 ```python
 import asyncio
@@ -137,133 +87,83 @@ from waveql import connect_async
 
 async def main():
     conn = await connect_async(
-        "servicenow://instance.service-now.com",
-        username="admin",
-        password="password"
+        "jira://your-domain.atlassian.net",
+        username="user@example.com",
+        password="api-token"
     )
     
     cursor = conn.cursor()
-    await cursor.execute("SELECT * FROM incident LIMIT 10")
+    # Predicates are pushed down to JQL!
+    await cursor.execute("SELECT key, summary FROM issues WHERE project = 'PROJ'")
+    
     results = await cursor.fetchall()
     print(results)
 
 asyncio.run(main())
 ```
 
-## Adapters
+### 3. The Power of Cross-Source Joins
 
-| Adapter | Predicate Pushdown | Aggregation | CRUD | Async |
-|---------|-------------------|-------------|------|-------|
-| **ServiceNow** | ✅ ServiceNow Query | ✅ Stats API | ✅ | ✅ |
-| **Salesforce** | ✅ SOQL | ✅ SOQL | ✅ | ✅ |
-| **Jira** | ✅ JQL | ❌ | ✅ | ✅ |
-| **REST** | ⚠️ Configurable | ❌ | ✅ | ❌ |
-| **File** | ✅ DuckDB | ✅ DuckDB | ❌ | ❌ |
+Combine data from anywhere.
 
-## Authentication
+```python
+conn.execute("""
+    SELECT 
+        sn.number as ticket_id,
+        jira.key as engineering_task,
+        sn.short_description
+    FROM servicenow.incident sn
+    JOIN jira.issues jira ON sn.correlation_id = jira.key
+    WHERE sn.priority = 1
+""")
+```
 
-WaveQL supports multiple authentication methods:
+## 🛠 Supported Adapters
+
+| Adapter | URI Scheme | Features |
+|:--------|:-----------|:---------|
+| **ServiceNow** | `servicenow://` | ✅ Table API, ✅ Aggregates, ✅ Write (CRUD) |
+| **Salesforce** | `salesforce://` | ✅ SOQL Pushdown, ✅ Bulk API support |
+| **Jira** | `jira://` | ✅ JQL Pushdown, ✅ Pagination |
+| **REST** | `rest://` | ⚠️ Generic JSON querying |
+| **File** | `file://` | ✅ CSV, Parquet, JSON (via DuckDB) |
+
+## 🔐 Authentication
+
+WaveQL takes the headache out of auth headers.
+
+*   **Basic Auth**: Simple username/password.
+*   **API Key**: Custom headers or query params.
+*   **OAuth2**: Full flow support including token refresh.
 
 ```python
 from waveql.auth import AuthManager
 
-# Basic Auth
-auth = AuthManager(username="user", password="pass")
-
-# API Token
-auth = AuthManager(api_key="your-api-key", api_key_header="Authorization")
-
-# OAuth2 Client Credentials
+# OAuth2 Example
 auth = AuthManager(
-    oauth2_token_url="https://login.example.com/oauth/token",
+    oauth2_token_url="https://login.salesforce.com/services/oauth2/token",
     client_id="your_client_id",
     client_secret="your_client_secret"
 )
-
-# Use with adapter
-conn = connect("servicenow://instance.service-now.com", auth_manager=auth)
+conn = waveql.connect("salesforce://login.salesforce.com", auth_manager=auth)
 ```
 
-## Connection Pooling
+## 🤝 Contributing
 
-WaveQL automatically pools HTTP connections for better performance:
+We love contributions! Whether it's a new adapter, a bug fix, or a docs improvement, please join us.
 
-```python
-from waveql.utils import PoolConfig, configure_pools
+1.  Fork the repository
+2.  Create your feature branch (`git checkout -b feature/amazing-feature`)
+3.  Commit your changes (`git commit -m 'Add some amazing feature'`)
+4.  Push to the branch (`git push origin feature/amazing-feature`)
+5.  Open a Pull Request
 
-# Configure pool settings
-config = PoolConfig(
-    max_connections_per_host=20,
-    max_total_connections=200,
-    connect_timeout=10.0,
-    read_timeout=30.0,
-)
-configure_pools(config)
+## 📄 License
 
-# All connections now use the shared pool
-conn1 = connect("servicenow://instance1.service-now.com", ...)
-conn2 = connect("servicenow://instance2.service-now.com", ...)
-```
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## SQLAlchemy Integration
-
-Use WaveQL with Pandas, Superset, or any SQLAlchemy-compatible tool:
-
-```python
-from sqlalchemy import create_engine
-import pandas as pd
-
-# Create engine
-engine = create_engine(
-    "waveql.servicenow://instance.service-now.com",
-    connect_args={"username": "admin", "password": "pass"}
-)
-
-# Query with pandas
-df = pd.read_sql("SELECT * FROM incident LIMIT 100", engine)
-```
-
-## CRUD Operations
-
-```python
-# INSERT
-cursor.execute("""
-    INSERT INTO incident (short_description, priority)
-    VALUES ('New issue', 2)
-""")
-
-# UPDATE
-cursor.execute("""
-    UPDATE incident 
-    SET priority = 1 
-    WHERE sys_id = 'abc123'
-""")
-
-# DELETE
-cursor.execute("DELETE FROM incident WHERE sys_id = 'abc123'")
-```
-
-## Documentation
-
-- [API Reference](docs/api.md)
-- [Adapter Guide](docs/adapters.md)
-- [Authentication](docs/auth.md)
-- [Performance Tuning](docs/performance.md)
-
-## Roadmap
-
-See [ROADMAP.md](ROADMAP.md) for planned features.
-
-## Contributing
-
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-## License
-
-MIT License - see [LICENSE](LICENSE) for details.
+Copyright (c) 2026 **Mitayan Chakma**.
 
 ---
 
-<p align="center">
-  Made with ❤️ for the data engineering community
-</p>
+

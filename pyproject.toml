@@ -9,7 +9,7 @@ description = "Open-source universal Python connector for APIs - Query any data 
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.9"
-authors = [{ name = "WaveQL Contributors" }]
+authors = [{ name = "Mitayan Chakma", email = "mitayan@example.com" }]
 keywords = ["sql", "api", "connector", "duckdb", "servicenow", "salesforce", "database"]
 classifiers = [
     "Development Status :: 3 - Alpha",

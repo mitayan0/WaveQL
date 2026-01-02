@@ -1,7 +1,7 @@
 """
 WaveQL - Universal Python Connector
 
-Query any API with SQL. Open-source alternative to CData connectors.
+Query any API with SQL.
 
 Usage:
     import waveql
