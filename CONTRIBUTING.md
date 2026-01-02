@@ -8,7 +8,7 @@ Thank you for your interest in contributing to WaveQL! This document provides gu
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/waveql.git
+   git clone https://github.com/mitayan0/WaveQL.git
    cd waveql
    ```
 
@@ -35,7 +35,7 @@ Thank you for your interest in contributing to WaveQL! This document provides gu
 
 ### Reporting Bugs
 
-- Check if the bug has already been reported in [Issues](https://github.com/yourusername/waveql/issues)
+- Check if the bug has already been reported in [Issues](https://github.com/mitayan0/WaveQL/issues)
 - If not, create a new issue with:
   - Clear title and description
   - Steps to reproduce

@@ -32,11 +32,11 @@
 
 ```bash
 # From GitHub
-pip install git+https://github.com/yourusername/waveql.git
+pip install git+https://github.com/mitayan0/WaveQL.git
 
 # Or clone and install locally
-git clone https://github.com/yourusername/waveql.git
-cd waveql
+git clone https://github.com/mitayan0/WaveQL.git
+cd WaveQL
 pip install -e .
 ```
 
