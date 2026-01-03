@@ -6,32 +6,32 @@ WaveQL allows data engineers, developers, and data scientists to query SaaS plat
 
 ## Content Overview
 
-### 📘 [Architecture & Design](architecture.md)
+### [Architecture & Design](architecture.md)
 Understand how WaveQL translates SQL into API calls, handles connection pooling, and leverages Apache Arrow for high-performance data transport.
 *   [Query Lifecycle](architecture.md#query-lifecycle)
 *   [Predicate Pushdown Engine](architecture.md#predicate-pushdown-engine)
 *   [Virtual Joins (DuckDB)](architecture.md#virtual-joins)
 
-### 🔌 [Adapter Guide](adapters.md)
+### [Adapter Guide](adapters.md)
 Detailed documentation on built-in adapters and instructions for building custom connectors.
 *   [ServiceNow](adapters.md#servicenow)
 *   [Salesforce](adapters.md#salesforce)
 *   [Jira](adapters.md#jira)
 *   [Implementing Custom Adapters](adapters.md#custom-adapters)
 
-### 🔐 [Authentication](auth.md)
+### [Authentication](auth.md)
 Securely managing credentials and authentication flows.
 *   [AuthManager](auth.md#authmanager)
 *   [OAuth2 Flows](auth.md#oauth2)
 *   [API Key & Basic Auth](auth.md#basic-auth)
 
-### ⚡ [Performance Tuning](performance.md)
+### [Performance Tuning](performance.md)
 Best practices for optimizing query performance and minimizing API usage.
 *   [Pagination Strategies](performance.md#pagination)
 *   [Memory Management](performance.md#memory)
 *   [Async Concurrency](performance.md#concurrency)
 
-### 📚 [API Reference](api.md)
+### [API Reference](api.md)
 Comprehensive class and function reference for the WaveQL SDK.
 
 ---

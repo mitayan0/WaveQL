@@ -130,7 +130,15 @@ class ServiceNowAdapter(BaseAdapter):
         schema_columns = self._get_or_discover_schema(table_name, records)
         
         # Convert to Arrow
-        return self._to_arrow(records, schema_columns, columns)
+        table = self._to_arrow(records, schema_columns, columns)
+        
+        # Attach execution metadata for observability
+        if "sysparm_query" in params:
+            table = table.replace_schema_metadata({
+                b"waveql_source_query": params["sysparm_query"].encode("utf-8")
+            })
+            
+        return table
     
     async def fetch_async(
         self,
@@ -167,7 +175,15 @@ class ServiceNowAdapter(BaseAdapter):
             records = await self._fetch_all_pages_async(url, params, limit)
         
         schema_columns = await self._get_or_discover_schema_async(table_name, records)
-        return self._to_arrow(records, schema_columns, columns)
+        table = self._to_arrow(records, schema_columns, columns)
+        
+        # Attach execution metadata for observability
+        if "sysparm_query" in params:
+            table = table.replace_schema_metadata({
+                b"waveql_source_query": params["sysparm_query"].encode("utf-8")
+            })
+            
+        return table
 
     def _extract_table_name(self, table: str) -> str:
         """Extract table name from schema.table format and strip quotes."""
@@ -717,7 +733,15 @@ class ServiceNowAdapter(BaseAdapter):
         data = response.json()
             
         result = data.get("result", [])
-        return self._process_stats_result(result, limit, aggregates)
+        table = self._process_stats_result(result, limit, aggregates)
+        
+        # Attach execution metadata
+        if "sysparm_query" in params:
+            table = table.replace_schema_metadata({
+                b"waveql_source_query": params["sysparm_query"].encode("utf-8")
+            })
+            
+        return table
 
     def _build_stats_params(self, predicates, group_by, aggregates, order_by) -> Dict:
         """Helper to build stats params (moved out of _fetch_stats)."""
@@ -795,7 +819,15 @@ class ServiceNowAdapter(BaseAdapter):
         with self._get_session() as session:
             response = session.get(url, params=params, headers=headers)
             response.raise_for_status()
-            return self._process_stats_result(response.json().get("result", []), limit, aggregates)
+            table = self._process_stats_result(response.json().get("result", []), limit, aggregates)
+            
+            # Attach execution metadata
+            if "sysparm_query" in params:
+                table = table.replace_schema_metadata({
+                    b"waveql_source_query": params["sysparm_query"].encode("utf-8")
+                })
+                
+            return table
 
     async def _fetch_attachment_content_async(self, predicates: List["Predicate"]) -> pa.Table:
         """Fetch binary content from the Attachment API (async)."""

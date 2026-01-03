@@ -61,6 +61,7 @@ class QueryInfo:
     group_by: List[str] = field(default_factory=list)
     aggregates: List[Aggregate] = field(default_factory=list)
     raw_sql: str = ""
+    is_explain: bool = False
 
 
 class QueryPlanner:
@@ -83,6 +84,27 @@ class QueryPlanner:
         except Exception as e:
             logger.debug(f"sqlglot failed to parse query, falling back to RAW: {e}")
             return QueryInfo(operation="RAW", raw_sql=sql)
+
+        # 1. Handle EXPLAIN
+        # Some versions of sqlglot use exp.Explain, others use exp.Command
+        is_explain = False
+        inner_expression = None
+
+        explain_class = getattr(exp, "Explain", None)
+        if explain_class and isinstance(expression, explain_class):
+            is_explain = True
+            inner_expression = expression.this
+        elif isinstance(expression, exp.Command) and expression.this.upper() == "EXPLAIN":
+            is_explain = True
+            inner_expression = expression.expression
+
+        if is_explain and inner_expression:
+            # Recursively parse the inner statement
+            # If inner_expression is a parser Literal (from Command), use .this to get the raw string
+            inner_sql = inner_expression.this if isinstance(inner_expression, exp.Literal) else inner_expression.sql() 
+            info = self.parse(inner_sql)
+            info.is_explain = True
+            return info
 
         if isinstance(expression, exp.Select):
             return self._parse_select(expression, sql)
@@ -243,9 +265,19 @@ class QueryPlanner:
     def _parse_insert(self, expression: exp.Insert, raw_sql: str) -> QueryInfo:
         """Parse INSERT statement."""
         info = QueryInfo(operation="INSERT", raw_sql=raw_sql)
-        info.table = expression.this.sql()
+        # Handle Schema object (table details with columns)
+        if isinstance(expression.this, exp.Schema):
+            info.table = expression.this.this.sql()
+            # If explicit columns are provided in the Schema, use them if not already found
+            schema_cols = [e.sql() for e in expression.this.expressions]
+        else:
+            info.table = expression.this.sql()
+            schema_cols = []
         
+        # Get columns from args if present (typical in some dialects) or fallback to Schema columns
         cols = [c.sql() for c in expression.args.get("columns", [])]
+        if not cols and schema_cols:
+            cols = schema_cols
         
         # Check for VALUES clause
         values_expr = expression.expression

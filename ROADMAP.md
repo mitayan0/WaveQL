@@ -1,13 +1,13 @@
 # WaveQL Project Roadmap
 
-## 🚀 Active Development
+## Active Development
 - [x] **Salesforce Adapter** (Priority: High)
   - [x] Simple Object Query Language (SOQL) support
   - [x] CRUD Operations
   - [x] OAuth2 User-Agent/Web Server flow support (Provided by AuthManager)
   - [x] Bulk API support for large datasets (Ingest)
 
-## ✅ Completed Features
+## Completed Features
 - [x] **Core Architecture**
   - [x] DB-API 2.0 Compliance (Connection, Cursor)
   - [x] DuckDB Integration
@@ -33,7 +33,7 @@
   - [x] Virtual Joins (Cross-adapter joins via DuckDB)
   - [x] Schema-qualified table support (e.g., `sales.Account`)
 
-## 📅 Planned Features
+## Planned Features
 
 ### Phase 2: Advanced Capabilities
 - [x] **Aggregation Pushdown**
@@ -50,8 +50,20 @@
   - Integration with BI tools (Superset, Metabase)
 
 ### Phase 3: Enterprise & Performance
-- [ ] **Query Metrics & Logging**
-  - detailed execution plans and timing logs
+- [x] **Query Metrics & Observability**
+  - [x] `EXPLAIN` support for execution plans
+  - [x] Logging of actual API queries sent to sources
+  - [x] Performance timing (API Latency vs local processing)
+- [ ] **Query Optimizer**
+  - [ ] **Semi-Join Pushdown**: Push `JOIN` predicates to remote adapters using `IN` filters
+  - [ ] Complex predicate extraction (nested `OR` support)
+  - [ ] Subquery pushdown for single-adapter sources
+- [ ] **Caching & Durability**
+  - [ ] **Materialized Views**: Local Parquet snapshots of remote tables
+  - [ ] **Incremental Sync Utility**: Managed syncing based on timestamps (e.g., `sys_updated_on`)
+- [ ] **Streaming & Scalability**
+  - [ ] Generator-based streaming for large result sets (RecordBatch yielding)
+  - [ ] Memory-efficient fetching for million-row exports
 - [ ] **Integration Tests**
   - Live testing against real sandbox environments
 
@@ -61,7 +73,8 @@
   - [x] Issues, Projects, Users tables
   - [x] Full CRUD operations
   - [x] Async support
-- [ ] HubSpot
-- [ ] Shopify
-- [ ] MySQL/PostgreSQL (Pass-through)
+- [ ] **SQL Pass-through** (MySQL, PostgreSQL, SQL Server)
+- [ ] **Cloud Storage** (S3, GCS, Azure Blob via DuckDB)
+- [ ] **SaaS Expansion**: HubSpot, Shopify, Zendesk, Stripe
+- [ ] **Google Sheets Adapter**
 

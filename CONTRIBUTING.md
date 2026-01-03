@@ -209,4 +209,5 @@ Be respectful, inclusive, and constructive. We're all here to build something gr
 - Open an issue with the `question` label
 - Join our discussions
 
-Thank you for contributing! 🎉
+Thank you for contributing!
+

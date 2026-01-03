@@ -22,15 +22,15 @@
 
 Built for data engineers and developers, it translates your SQL queries into optimized API calls (pushing down predicates like `WHERE` and `ORDER BY`), handles authentications, and returns high-performance **Arrow** or **Pandas** dataframes.
 
-## 🚀 Why WaveQL?
+## Why WaveQL?
 
-*   **🔌 Universal Adapter System**: Connect to ServiceNow, Salesforce, Jira, or generic REST APIs with a unified interface.
-*   **⚡ Intelligent Query Pushdown**: We don't just fetch all data. `WHERE` clauses are translated into native API filters (e.g., JQL, SOQL) for maximum performance.
-*   **🔄 Cross-Source JOINs**: Seamlessly join data between your local CSVs, a Jira backlog, and ServiceNow incidents using our DuckDB-powered engine.
-*   **⚡ Async Built-in**: Built on `httpx` and `anyio` for high-concurrency, non-blocking applications.
-*   **🐼 Data Science Ready**: Native integrations with Pandas, PyArrow, and SQLAlchemy (works with Superset!).
+*   **Universal Adapter System**: Connect to ServiceNow, Salesforce, Jira, or generic REST APIs with a unified interface.
+*   **Intelligent Query Pushdown**: We don't just fetch all data. `WHERE` clauses are translated into native API filters (e.g., JQL, SOQL) for maximum performance.
+*   **Cross-Source JOINs**: Seamlessly join data between your local CSVs, a Jira backlog, and ServiceNow incidents using our DuckDB-powered engine.
+*   **Async Built-in**: Built on `httpx` and `anyio` for high-concurrency, non-blocking applications.
+*   **Data Science Ready**: Native integrations with Pandas, PyArrow, and SQLAlchemy (works with Superset!).
 
-## 📦 Installation
+## Installation
 
 ```bash
 pip install waveql
@@ -44,7 +44,7 @@ cd WaveQL
 pip install -e .
 ```
 
-## ⚡ Quick Start
+## Quick Start
 
 ### 1. Querying ServiceNow
 
@@ -118,17 +118,17 @@ conn.execute("""
 """)
 ```
 
-## 🛠 Supported Adapters
+## Supported Adapters
 
 | Adapter | URI Scheme | Features |
 |:--------|:-----------|:---------|
-| **ServiceNow** | `servicenow://` | ✅ Table API, ✅ Aggregates, ✅ Write (CRUD) |
-| **Salesforce** | `salesforce://` | ✅ SOQL Pushdown, ✅ Bulk API support |
-| **Jira** | `jira://` | ✅ JQL Pushdown, ✅ Pagination |
-| **REST** | `rest://` | ⚠️ Generic JSON querying |
-| **File** | `file://` | ✅ CSV, Parquet, JSON (via DuckDB) |
+| **ServiceNow** | `servicenow://` | Table API, Aggregates, Write (CRUD) |
+| **Salesforce** | `salesforce://` | SOQL Pushdown, Bulk API support |
+| **Jira** | `jira://` | JQL Pushdown, Pagination |
+| **REST** | `rest://` | Generic JSON querying |
+| **File** | `file://` | CSV, Parquet, JSON (via DuckDB) |
 
-## 📝 SQL Syntax Support
+## SQL Syntax Support
 
 WaveQL supports ANSI SQL with full compatibility for **schema-qualified** and **quoted identifiers**:
 
@@ -142,7 +142,7 @@ SELECT * FROM servicenow."incident"
 
 **Supports:** `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `JOIN`, `GROUP BY`, `ORDER BY`, `LIMIT`, `OFFSET`
 
-## 🔐 Authentication
+## Authentication
 
 WaveQL takes the headache out of auth headers.
 
@@ -162,7 +162,7 @@ auth = AuthManager(
 conn = waveql.connect("salesforce://login.salesforce.com", auth_manager=auth)
 ```
 
-## 🤝 Contributing
+## Contributing
 
 We love contributions! Whether it's a new adapter, a bug fix, or a docs improvement, please join us.
 
@@ -172,12 +172,6 @@ We love contributions! Whether it's a new adapter, a bug fix, or a docs improvem
 4.  Push to the branch (`git push origin feature/amazing-feature`)
 5.  Open a Pull Request
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-Copyright (c) 2026 **Mitayan Chakma**.
-
----
-
-
