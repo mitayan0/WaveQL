@@ -267,8 +267,11 @@ class WaveQLCursor:
                 adapter = self._resolve_adapter(temp_info)
                 
                 if adapter:
+                    # Clean table name for adapter
+                    clean_table = self._clean_table_name(table_name)
+                    
                     # Fetch data (select * for now to support join filtering)
-                    data = adapter.fetch(table=table_name, columns=["*"])
+                    data = adapter.fetch(table=clean_table, columns=["*"])
                     
                     if data is not None and len(data) >= 0:
                         # Handle schema-qualified table names (e.g., "sales.Account")
