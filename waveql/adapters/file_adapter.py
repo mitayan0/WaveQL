@@ -50,12 +50,16 @@ class FileAdapter(BaseAdapter):
         self._duckdb = duckdb.connect(":memory:")
         self._config = kwargs
     
+    
     def _detect_file_type(self) -> str:
         """Detect file type from extension."""
-        if self._path.suffix.lower() == ".parquet":
+        suffix = self._path.suffix.lower()
+        if suffix == ".parquet":
             return "parquet"
-        elif self._path.suffix.lower() == ".json":
+        elif suffix == ".json":
             return "json"
+        elif suffix in [".xlsx", ".xls"]:
+            return "excel"
         else:
             return "csv"
     
@@ -82,8 +86,32 @@ class FileAdapter(BaseAdapter):
         sql = self._build_query(file_path, columns, predicates, limit, offset, order_by, group_by, aggregates)
         
         try:
-            result = self._duckdb.execute(sql)
-            return result.fetch_arrow_table()
+            # For Excel, we might need to load it into DuckDB first via Pandas if not using the extension
+            if self._file_type == "excel":
+                # Check if we are querying the file itself or a table we already registered
+                # Optimization: Register the dataframe as a view in DuckDB first
+                import pandas as pd
+                df = pd.read_excel(file_path)
+                # Register temporarily
+                temp_name = f"excel_{abs(hash(file_path))}"
+                self._duckdb.register(temp_name, df)
+                
+                # Rewrite SQL to query the temp table instead of read_... function
+                # The _build_query for excel returns "SELECT * FROM 'filepath'" which is wrong for this approach
+                # We need to construct the SQL here slightly differently or modifying _build_query
+                # Let's rely on _build_query doing the "SELECT ... FROM view_name" logic if we handle it there.
+                
+                # Actually, simpler approach:
+                # _build_query returns "SELECT ... FROM source". 
+                # For Excel, source should be the registered view.
+                
+                # Execute
+                result = self._duckdb.execute(sql.replace(f"'{file_path}'", temp_name))
+                self._duckdb.unregister(temp_name)
+                return result.fetch_arrow_table()
+            else:
+                result = self._duckdb.execute(sql)
+                return result.fetch_arrow_table()
         except Exception as e:
             raise AdapterError(f"Failed to read file: {e}")
     
@@ -95,7 +123,7 @@ class FileAdapter(BaseAdapter):
         
         # If path is a directory, look for table as filename
         if self._path.is_dir():
-            for ext in [".parquet", ".csv", ".json"]:
+            for ext in [".parquet", ".csv", ".json", ".xlsx", ".xls"]:
                 file_path = self._path / f"{table}{ext}"
                 if file_path.exists():
                     return str(file_path)
@@ -141,6 +169,9 @@ class FileAdapter(BaseAdapter):
             source = f"read_parquet('{file_path}')"
         elif self._file_type == "json":
             source = f"read_json_auto('{file_path}')"
+        elif self._file_type == "excel":
+           # Placeholder, will be replaced in fetch
+           source = f"'{file_path}'" 
         else:
             # CSV with auto-detection
             source = f"read_csv_auto('{file_path}')"
@@ -161,8 +192,6 @@ class FileAdapter(BaseAdapter):
                     where_parts.append(f"{pred.column} {pred.operator} {value}")
             sql += " WHERE " + " AND ".join(where_parts)
         
-
-            
         # GROUP BY
         if group_by:
             sql += " GROUP BY " + ", ".join(group_by)
@@ -192,7 +221,13 @@ class FileAdapter(BaseAdapter):
         
         file_path = self._resolve_path(table)
         
-        if self._file_type == "parquet":
+        if self._file_type == "excel":
+           import pandas as pd
+           df = pd.read_excel(file_path, nrows=1)
+           # Register
+           self._duckdb.register("temp_schema_excel", df)
+           sql = "DESCRIBE SELECT * FROM temp_schema_excel"
+        elif self._file_type == "parquet":
             sql = f"DESCRIBE SELECT * FROM read_parquet('{file_path}')"
         elif self._file_type == "json":
             sql = f"DESCRIBE SELECT * FROM read_json_auto('{file_path}')"
@@ -209,6 +244,10 @@ class FileAdapter(BaseAdapter):
                 )
                 for row in result
             ]
+            
+            if self._file_type == "excel":
+                self._duckdb.unregister("temp_schema_excel")
+                
             self._cache_schema(table, columns)
             return columns
         except Exception as e:
@@ -236,15 +275,19 @@ class FileAdapter(BaseAdapter):
             if parameters:
                 # Handle single parameter set vs batch
                 # If parameters is a list of parameters for this row
+                # Check if parameters is 1D or 2D (batch)
+                # But executemany calls execute_batch, checking base adapter
+                # This insert is for single row mostly via execute
                 current_params = parameters
                 
             param_idx = 0
             for col, val in values.items():
-                if isinstance(val, ParameterPlaceholder) or val == '?':
-                    if parameters and param_idx < len(parameters):
+                if hasattr(val, 'name') and val.name == 'ParameterPlaceholder' or val == '?':
+                    # Check for ParameterPlaceholder object or string '?'
+                     if parameters and param_idx < len(parameters):
                         resolved_values[col] = parameters[param_idx]
                         param_idx += 1
-                    else:
+                     else:
                         raise QueryError(f"Missing parameter for column {col}")
                 else:
                     resolved_values[col] = val

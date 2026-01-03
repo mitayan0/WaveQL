@@ -18,9 +18,16 @@
 
 ---
 
-**WaveQL** transforms the way you interact with SaaS APIs. Instead of wrestling with complex, proprietary REST endpoints and pagination logic, WaveQL lets you query your business data using the language you already know: **SQL**.
+**WaveQL** is the **Universal SQL Connector** for your modern data stack.
 
-Built for data engineers and developers, it translates your SQL queries into optimized API calls (pushing down predicates like `WHERE` and `ORDER BY`), handles authentications, and returns high-performance **Arrow** or **Pandas** dataframes.
+It unifies **SaaS APIs** (ServiceNow, Salesforce, Jira), **Databases** (Postgres, MySQL), and **Files** (CSV, Excel/XLSX, Parquet) under a single, standard SQL interface.
+
+Instead of writing custom scripts for every data source, use WaveQL to:
+*   **Query** live API data using SQL.
+*   **Join** complex data sources (e.g., "Join ServiceNow Incidents with a local Excel sheet of VIP users").
+*   **Stream** changes in real-time.
+
+Built for data engineers and developers, it translates your SQL queries into optimized API calls (pushing down predicates like `WHERE` and `ORDER BY`) and handles authentications automatically.
 
 ## Why WaveQL?
 
@@ -100,20 +107,29 @@ async def main():
 asyncio.run(main())
 ```
 
-### 3. The Power of Cross-Source Joins
+### 3. The Power of "Join Global"
 
-Combine data from anywhere.
+Combine data from APIs, Files, and Databases in one query.
 
 ```python
-conn.execute("""
+# 1. Register a local Excel file
+conn.execute("CREATE TABLE vip_users AS SELECT * FROM 'vips.xlsx'")
+
+# 2. Join ServiceNow Incidents with the Excel file
+# Find high-priority incidents affecting VIP users
+cursor.execute("""
     SELECT 
-        sn.number as ticket_id,
-        jira.key as engineering_task,
-        sn.short_description
+        sn.number as ticket,
+        sn.short_description,
+        vip.name as vip_name,
+        vip.department
     FROM servicenow.incident sn
-    JOIN jira.issues jira ON sn.correlation_id = jira.key
+    JOIN vip_users vip ON sn.caller_id = vip.user_id
     WHERE sn.priority = 1
 """)
+
+for row in cursor:
+    print(f"VIP Alert: {row.vip_name} has ticket {row.ticket}")
 ```
 
 ## Supported Adapters

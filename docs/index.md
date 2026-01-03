@@ -47,9 +47,19 @@ Real-time streaming of data changes from your sources.
 
 ## Technical Philosophy
 
-WaveQL follows the **Python DB-API 2.0 (PEP 249)** standard, ensuring compatibility with the broader Python data ecosystem (SQLAlchemy, Pandas, Superset).
+WaveQL is built on the belief that **data location should be transparent to the analyst**. Whether your data lives in a high-performance database, a SaaS API, a local spreadsheet, or a CSV file, you should be able to query and join it using a single, unified SQL interface.
 
-Key design principles include:
-1.  **Pushdown First**: Whenever possible, compute should happen at the source. `WHERE` clauses are translated to native API filters (e.g., JQL, SOQL).
-2.  **Zero-Copy Transport**: We utilize PyArrow to minimize serialization overhead when moving data from network responses to analytics frames.
-3.  **Universal Interface**: The consumer of the data should not need to know the underlying implementation details of the API.
+**1. Universal Connectivity**
+WaveQL connects to *anything*:
+*   **APIs**: ServiceNow, Salesforce, Jira, REST
+*   **Databases**: PostgreSQL, MySQL, SQLite (via SQLAlchemy/DuckDB)
+*   **Files**: CSV, Parquet, JSON, Excel (XLSX)
+
+**2. The "Join Global" Engine**
+WaveQL embeds a powerful in-memory analytical engine (DuckDB) that allows you to perform **federated queries**. You can join a table from ServiceNow with a local Excel file and a PostgreSQL database in a single SQL statement.
+
+**3. Pushdown Optimization**
+While we allow you to join anything, we respect the source's capabilities. WaveQL intelligently pushes down filters (`WHERE` clauses) and aggregations to the source system whenever possible to minimize data transfer.
+
+**4. Zero-Copy Transport**
+We utilize Apache Arrow to move data efficiently between systems, minimizing serialization overhead and ensuring high performance for data science workflows.

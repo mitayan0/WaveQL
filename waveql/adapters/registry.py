@@ -67,6 +67,9 @@ def _register_builtin_adapters():
         register_adapter("file", FileAdapter)
         register_adapter("csv", FileAdapter)
         register_adapter("parquet", FileAdapter)
+        register_adapter("excel", FileAdapter)
+        register_adapter("xlsx", FileAdapter)
+        register_adapter("xls", FileAdapter)
     except ImportError:
         pass
 
