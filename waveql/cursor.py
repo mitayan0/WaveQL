@@ -10,6 +10,7 @@ import pyarrow as pa
 
 from waveql.exceptions import QueryError
 from waveql.query_planner import QueryPlanner
+from waveql.observability import QueryPlan
 
 if TYPE_CHECKING:
     from waveql.connection import WaveQLConnection
@@ -37,8 +38,12 @@ class WaveQLCursor:
         self._result: Optional[pa.Table] = None
         self._result_index = 0
         
+        
         # Query planner for predicate extraction
         self._planner = QueryPlanner()
+        
+        # Last execution plan
+        self.last_plan: Optional[QueryPlan] = None
     
     @property
     def description(self) -> Optional[List[Tuple]]:
@@ -79,18 +84,30 @@ class WaveQLCursor:
         # Parse query to extract table, predicates, etc.
         query_info = self._planner.parse(operation)
         
+        # Initialize execution plan
+        self.last_plan = QueryPlan(sql=operation, is_explain=query_info.is_explain)
+        
         # Determine which adapter to use
         adapter = self._resolve_adapter(query_info)
         
-        if query_info.joins:
-            # Handle virtual join across adapters
-            self._result = self._execute_virtual_join(query_info, operation, parameters)
-        elif adapter:
-            # Route to adapter with predicate pushdown
-            self._result = self._execute_via_adapter(query_info, adapter, parameters)
-        else:
-            # Fall back to direct DuckDB execution
-            self._result = self._execute_direct(operation, parameters)
+        try:
+            if query_info.joins:
+                # Handle virtual join across adapters
+                self._result = self._execute_virtual_join(query_info, operation, parameters)
+            elif adapter:
+                # Route to adapter with predicate pushdown
+                self._result = self._execute_via_adapter(query_info, adapter, parameters)
+            else:
+                # Fall back to direct DuckDB execution
+                self._result = self._execute_direct(operation, parameters)
+        finally:
+            self.last_plan.finish()
+        
+        if query_info.is_explain:
+            # For EXPLAIN, return the plan as a single-column table
+            plan_text = self.last_plan.format_text()
+            self._result = pa.Table.from_pydict({"Execution Plan": [plan_text]})
+            self._rowcount = 1
         
         # Update description from result schema
         self._update_description()
@@ -167,6 +184,15 @@ class WaveQLCursor:
         
         # Let adapter fetch data with pushed-down predicates
         if query_info.operation == "SELECT":
+            step = self.last_plan.add_step(
+                name=f"Fetch from {adapter.adapter_name}",
+                type="fetch",
+                details={
+                    "table": clean_table,
+                    "adapter": adapter.adapter_name,
+                    "pushdown_predicates": [str(p) for p in query_info.predicates]
+                }
+            )
             try:
                 data = adapter.fetch(
                     table=clean_table,
@@ -178,19 +204,33 @@ class WaveQLCursor:
                     group_by=query_info.group_by,
                     aggregates=query_info.aggregates,
                 )
+                
+                # Check for source query in metadata
+                if data is not None and data.schema.metadata:
+                    source_query = data.schema.metadata.get(b"waveql_source_query")
+                    if source_query:
+                        step.details["source_query"] = source_query.decode("utf-8")
+                
+                step.finish()
                 self._rowcount = len(data) if data else 0
                 return data
             except NotImplementedError:
+                step.finish()
                 # Adapter does not support aggregation pushdown.
                 # Fallback: Fetch raw data (filtered) and execute SQL locally in DuckDB.
                 
+                step_raw = self.last_plan.add_step(
+                    name=f"Fetch raw data from {adapter.adapter_name} (Fallback)",
+                    type="fetch",
+                    details={"table": clean_table, "adapter": adapter.adapter_name}
+                )
                 # Fetch raw data with predicates pushed down
                 raw_data = adapter.fetch(
                     table=clean_table,
                     columns=None, 
                     predicates=query_info.predicates
-                    # Limit/Offset/Order apply to result, so we apply them in local SQL
                 )
+                step_raw.finish()
                 
                 if not raw_data or len(raw_data) == 0:
                      self._rowcount = 0
@@ -201,6 +241,11 @@ class WaveQLCursor:
                 self._connection._duckdb.register(temp_name, raw_data)
                 
                 try:
+                    step_local = self.last_plan.add_step(
+                        name="Local DuckDB execution (Fallback)",
+                        type="duckdb",
+                        details={"engine": "duckdb"}
+                    )
                     # Rewrite SQL: Replace table name with temp table name
                     # We target the FROM clause to be safe
                     # Pattern matches: FROM <whitespace> tableName <word-boundary>
@@ -209,6 +254,7 @@ class WaveQLCursor:
                     
                     # Execute
                     result = self._connection._duckdb.execute(rewritten_sql).fetch_arrow_table()
+                    step_local.finish()
                     self._rowcount = len(result)
                     return result
                 finally:
@@ -297,13 +343,17 @@ class WaveQLCursor:
                             registered_tables.append(table_name)
             
             # 3. Execute the JOIN query
+            step_join = self.last_plan.add_step(name="Virtual Join (DuckDB)", type="join")
             if parameters:
                 result = self._connection.duckdb.execute(sql, parameters)
             else:
                 result = self._connection.duckdb.execute(sql)
             
+            table = result.fetch_arrow_table()
+            step_join.finish()
+            
             self._rowcount = -1  # Unknown for virtual join
-            return result.fetch_arrow_table()
+            return table
             
         except Exception as e:
             raise QueryError(f"Virtual join failed: {e}")
@@ -317,14 +367,18 @@ class WaveQLCursor:
     
     def _execute_direct(self, sql: str, parameters: Sequence = None) -> pa.Table:
         """Execute directly on DuckDB."""
+        step = self.last_plan.add_step(name="Direct DuckDB execution", type="duckdb")
         try:
             if parameters:
                 result = self._connection.duckdb.execute(sql, parameters)
             else:
                 result = self._connection.duckdb.execute(sql)
             
-            return result.fetch_arrow_table()
+            table = result.fetch_arrow_table()
+            step.finish()
+            return table
         except Exception as e:
+            step.finish()
             raise QueryError(f"Query execution failed: {e}")
     
     def _update_description(self):
