@@ -84,6 +84,16 @@ def _register_builtin_adapters():
     except ImportError:
         pass
 
+    try:
+        from waveql.adapters.sql import SQLAdapter
+        register_adapter("sql", SQLAdapter)
+        register_adapter("mysql", SQLAdapter)
+        register_adapter("postgresql", SQLAdapter)
+        register_adapter("postgres", SQLAdapter)
+        register_adapter("mssql", SQLAdapter)
+    except ImportError:
+        pass
+
 
 _register_builtin_adapters()
 

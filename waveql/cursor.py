@@ -290,59 +290,163 @@ class WaveQLCursor:
 
     def _execute_virtual_join(self, query_info, sql: str, parameters: Sequence = None) -> pa.Table:
         """
-        Execute a virtual join across different adapters.
-        
-        Strategy:
-        1. Identify all tables involved (main table + joins).
-        2. Fetch data from each adapter (pushing down predicates if possible).
-        3. Register Arrow tables in DuckDB with proper schema handling.
-        4. Execute the original SQL against these registered tables.
+        Execute a virtual join with semi-join pushdown optimization.
         """
-        registered_tables = []
+        from collections import defaultdict
+        from waveql.query_planner import Predicate
         
+        registered_tables = []
+        created_views = []
+        dataset_cache = {} # clean_table_name -> Arrow Table
+
         try:
-            # 1. Identify tables and their adapters
-            tables = {query_info.table}
-            for join in query_info.joins:
-                tables.add(join["table"])
+            # 1. Map Tables & Aliases
+            # aliases: alias -> table_name
+            # Reverse map: table_name -> list of aliases (usually one)
+            table_aliases = defaultdict(list)
+            for alias, t_name in query_info.aliases.items():
+                table_aliases[t_name].append(alias)
             
-            # 2. Fetch and register data for each table
-            for table_name in tables:
-                # Use a dummy QueryInfo to resolve adapter
+            all_tables = {query_info.table}
+            for join in query_info.joins:
+                all_tables.add(join["table"])
+            
+            # 2. Group initial predicates by table
+            table_predicates = defaultdict(list)
+            for pred in query_info.predicates:
+                # Find which table this predicate belongs to via alias or direct name
+                # Simple logic: if column has dot, split it.
+                if "." in pred.column:
+                    alias_part, col_part = pred.column.split(".", 1)
+                    # Resolve alias
+                    table_name = query_info.aliases.get(alias_part, alias_part) # if no alias, assume it is table name
+                    # Store predicate with clean column name (optional? Adapter needs mapping?)
+                    # Current adapter fetch expects column names matching schema. 
+                    # If we strip alias from column, we must ensure adapter handles it.
+                    # BaseAdapter usually treats column names as is.
+                    # But if we push down 'u.active', the adapter for 'users' expects 'active'.
+                    # Let's strip the alias from the predicate column for the pushdown.
+                    p_copy = Predicate(column=col_part, operator=pred.operator, value=pred.value)
+                    table_predicates[table_name].append(p_copy)
+                else:
+                    # Ambiguous or Main Table? Assume main table if not aliased? 
+                    # For safety, add to main table
+                    table_predicates[query_info.table].append(pred)
+
+            # 3. Execution Plan (Simple Heuristic: Tables with predicates first)
+            # We want to fetch tables that reduce the dataset first.
+            sorted_tables = sorted(all_tables, key=lambda t: len(table_predicates[t]), reverse=True)
+            
+            # 4. Fetch Loop with Pushdown
+            pushed_filters = defaultdict(list) # table -> list[Predicate]
+            
+            fetched_tables = set()
+            
+            for table_name in sorted_tables:
+                # Resolve Adapter
                 temp_info = type(query_info)(operation="SELECT", table=table_name)
                 adapter = self._resolve_adapter(temp_info)
                 
                 if adapter:
-                    # Clean table name for adapter
                     clean_table = self._clean_table_name(table_name)
                     
-                    # Fetch data (select * for now to support join filtering)
-                    data = adapter.fetch(table=clean_table, columns=["*"])
+                    # Combine Base Predicates + Pushed Filters
+                    current_preds = table_predicates[table_name] + pushed_filters[table_name]
                     
-                    if data is not None and len(data) >= 0:
-                        # Handle schema-qualified table names (e.g., "sales.Account")
-                        if "." in table_name:
-                            schema, name = table_name.split(".", 1)
+                    # Fetch
+                    data = adapter.fetch(
+                        table=clean_table, 
+                        columns=["*"], 
+                        predicates=current_preds
+                    )
+                    dataset_cache[table_name] = data
+                    fetched_tables.add(table_name)
+                    
+                    # 5. Analyze Joins for Pushdown Opportunities
+                    # Check if this table is joined with any table NOT yet fetched
+                    # And if we can generate a filter.
+                    
+                    # We need to look at all joins
+                    # We look for: ON T1.c1 = T2.c2
+                    # If T1 is current table, and T2 is not fetched, push condition to T2.
+                    if data and len(data) > 0 and len(data) < 10000: # Limit pushdown for massive results
+                        for join in query_info.joins:
+                            if not join.get("on"): continue
                             
-                            # Create schema in DuckDB if needed
-                            self._connection.duckdb.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
-                            
-                            # Register with a unique temporary name
-                            import uuid
-                            temp_name = f"t_{uuid.uuid4().hex}"
-                            self._connection.duckdb.register(temp_name, data)
-                            registered_tables.append(temp_name)
-                            
-                            # Create a view with the schema-qualified name
-                            self._connection.duckdb.execute(
-                                f'CREATE OR REPLACE VIEW "{schema}"."{name}" AS SELECT * FROM "{temp_name}"'
-                            )
-                        else:
-                            # Simple table name - register directly
-                            self._connection.duckdb.register(table_name, data)
-                            registered_tables.append(table_name)
+                            # Join involves which tables?
+                            # We need to parse the predicates in 'on'
+                            for on_pred in join["on"]:
+                                if on_pred.operator == "=":
+                                    # Check left and right operands
+                                    # We expect format like "alias1.col"
+                                    # Simple parsing:
+                                    left, right = on_pred.column, on_pred.value
+                                    if not isinstance(right, str): continue # Value must be a column reference string
+                                    
+                                    # Resolve tables for left and right
+                                    t1_alias, t1_col = left.split(".", 1) if "." in left else (None, left)
+                                    t2_alias, t2_col = right.split(".", 1) if "." in right else (None, right)
+                                    
+                                    t1_name = query_info.aliases.get(t1_alias) if t1_alias else None # Ambiguous handling omitted
+                                    t2_name = query_info.aliases.get(t2_alias) if t2_alias else None
+                                    
+                                    target = None
+                                    source_col = None
+                                    target_col = None
+                                    
+                                    # If current table is T1, target is T2
+                                    if t1_name == table_name and t2_name and t2_name not in fetched_tables:
+                                        target = t2_name
+                                        source_col = t1_col
+                                        target_col = t2_col
+                                    elif t2_name == table_name and t1_name and t1_name not in fetched_tables:
+                                        target = t1_name
+                                        source_col = t2_col
+                                        target_col = t1_col
+                                    
+                                    if target:
+                                        # Extract unique values from current data
+                                        try:
+                                            # DuckDB/Arrow extraction
+                                            # source column in data might be 'c1' not 'alias.c1'
+                                            # Adapter fetch creates columns based on schema.
+                                            # Usually standard names.
+                                            unique_vals = data.column(source_col).unique().to_pylist()
+                                            # Remove None
+                                            unique_vals = [v for v in unique_vals if v is not None]
+                                            
+                                            if unique_vals and len(unique_vals) < 2000: # IN clause limit
+                                                # Create IN predicate
+                                                pushed_filters[target].append(
+                                                    Predicate(column=target_col, operator="IN", value=unique_vals)
+                                                )
+                                        except KeyError:
+                                            # Column not found in result, maybe aliasing mismatch
+                                            pass
             
-            # 3. Execute the JOIN query
+            # 6. Register all fetched data
+            for table_name, data in dataset_cache.items():
+                if data is not None:
+                     if "." in table_name:
+                         schema, name = table_name.split(".", 1)
+                         schema = schema.strip('"')
+                         name = name.strip('"')
+                         
+                         self._connection.duckdb.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
+                         temp_name = f"t_{uuid.uuid4().hex}"
+                         self._connection.duckdb.register(temp_name, data)
+                         registered_tables.append(temp_name)
+                         
+                         view_name = f'"{schema}"."{name}"'
+                         self._connection.duckdb.execute(
+                            f'CREATE OR REPLACE VIEW {view_name} AS SELECT * FROM "{temp_name}"'
+                         )
+                         created_views.append(view_name)
+                     else:
+                         self._connection.duckdb.register(table_name, data)
+                         registered_tables.append(table_name)
+
+            # 7. Execute JOIN
             step_join = self.last_plan.add_step(name="Virtual Join (DuckDB)", type="join")
             if parameters:
                 result = self._connection.duckdb.execute(sql, parameters)
@@ -352,18 +456,22 @@ class WaveQLCursor:
             table = result.fetch_arrow_table()
             step_join.finish()
             
-            self._rowcount = -1  # Unknown for virtual join
+            self._rowcount = -1
             return table
-            
+
         except Exception as e:
             raise QueryError(f"Virtual join failed: {e}")
         finally:
-            # Cleanup: unregister temporary tables to avoid memory leaks
+            for view_name in created_views:
+                try:
+                    self._connection.duckdb.execute(f'DROP VIEW IF EXISTS {view_name}')
+                except Exception:
+                    pass
             for temp_name in registered_tables:
                 try:
                     self._connection.duckdb.unregister(temp_name)
                 except Exception:
-                    pass  # Ignore cleanup errors
+                    pass
     
     def _execute_direct(self, sql: str, parameters: Sequence = None) -> pa.Table:
         """Execute directly on DuckDB."""
@@ -465,3 +573,10 @@ class WaveQLCursor:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
         return False
+    
+    def __repr__(self) -> str:
+        """String representation for debugging."""
+        status = "closed" if self._closed else "open"
+        result_len = len(self._result) if self._result is not None else 0
+        return f"<WaveQLCursor status={status} rows={result_len} position={self._result_index}>"
+

@@ -27,6 +27,8 @@ from typing import Any, Callable, Dict, Optional
 import requests
 import httpx
 
+from waveql.exceptions import AuthenticationError
+
 logger = logging.getLogger(__name__)
 
 
@@ -498,11 +500,6 @@ class JWTAuthManager(BaseAuthManager):
     def update_token(self, token: str):
         """Update the JWT token."""
         self._token = token
-
-
-class AuthenticationError(Exception):
-    """Raised when authentication fails."""
-    pass
 
 
 # Unified AuthManager class for backward compatibility

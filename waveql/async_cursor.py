@@ -1,3 +1,11 @@
+"""
+WaveQL Async Cursor - Asynchronous DB-API 2.0 style cursor with predicate pushdown
+
+Provides async/await support for:
+- Query execution with automatic adapter routing
+- Predicate pushdown to data sources
+- Arrow-native data handling
+"""
 
 from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
@@ -120,29 +128,24 @@ class AsyncWaveQLCursor:
             for join in query_info.joins:
                 tables.add(join["table"])
             
-            async def fetch_and_register(table_name):
+            async def fetch_and_register(table_name, results_dict):
+                """Fetch table data and store in shared dictionary."""
                 temp_info = type(query_info)(operation="SELECT", table=table_name)
                 adapter = self._resolve_adapter(temp_info)
                 if adapter:
                     data = await adapter.fetch_async(table=table_name, columns=["*"])
                     if data is not None:
-                        return table_name, data
-                return None, None
+                        results_dict[table_name] = data
 
-            # Fetch all tables concurrently
-            results = []
+            # Fetch all tables concurrently using task group
+            fetched_data = {}
             async with anyio.create_task_group() as tg:
                 for t in tables:
-                    # We can't easily return values from tg.start_soon, 
-                    # so we use a list or another pattern.
-                    pass # Placeholder for concurrent fetch logic
+                    tg.start_soon(fetch_and_register, t, fetched_data)
             
-            # Simplified sequential for now but could be parallel
-            for t in tables:
-                name, data = await fetch_and_register(t)
-                if name:
-                    # Registration in DuckDB is sync
-                    await anyio.to_thread.run_sync(self._register_in_duckdb, name, data, registered_tables)
+            # Register all fetched tables in DuckDB (sync operations)
+            for table_name, data in fetched_data.items():
+                await anyio.to_thread.run_sync(self._register_in_duckdb, table_name, data, registered_tables)
             
             # Execute JOIN in thread
             return await anyio.to_thread.run_sync(self._execute_direct, sql, parameters)
@@ -188,8 +191,32 @@ class AsyncWaveQLCursor:
         return [tuple(row.values()) for row in remaining.to_pylist()]
 
     async def close(self):
+        """Close the cursor."""
         self._closed = True
         self._result = None
+
+    @property
+    def arraysize(self) -> int:
+        """Number of rows to fetch at a time with fetchmany()."""
+        return self._arraysize
+    
+    @arraysize.setter
+    def arraysize(self, value: int):
+        self._arraysize = value
+
+    def fetchmany(self, size: int = None) -> List[Tuple]:
+        """Fetch next set of rows."""
+        if size is None:
+            size = self._arraysize
+        
+        rows = []
+        for _ in range(size):
+            row = self.fetchone()
+            if row is None:
+                break
+            rows.append(row)
+        
+        return rows
 
     def to_arrow(self) -> Optional[pa.Table]:
         """Return result as Arrow Table."""
@@ -200,3 +227,10 @@ class AsyncWaveQLCursor:
         if self._result is None:
             return None
         return self._result.to_pandas()
+
+    def __repr__(self) -> str:
+        """String representation for debugging."""
+        status = "closed" if self._closed else "open"
+        result_len = len(self._result) if self._result is not None else 0
+        return f"<AsyncWaveQLCursor status={status} rows={result_len} position={self._result_index}>"
+

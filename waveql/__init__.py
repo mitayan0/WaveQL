@@ -21,6 +21,11 @@ from waveql.exceptions import (
     AuthenticationError,
     QueryError,
     AdapterError,
+    SchemaError,
+    RateLimitError,
+    PredicatePushdownError,
+    ConfigurationError,
+    TimeoutError,
 )
 from waveql.adapters import BaseAdapter, register_adapter, get_adapter
 from waveql.auth import (
@@ -32,16 +37,23 @@ from waveql.auth import (
     create_auth_manager,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 __all__ = [
     "connect",
     "WaveQLConnection",
     "WaveQLCursor",
+    # Exceptions
     "WaveQLError",
     "ConnectionError",
     "AuthenticationError",
     "QueryError",
     "AdapterError",
+    "SchemaError",
+    "RateLimitError",
+    "PredicatePushdownError",
+    "ConfigurationError",
+    "TimeoutError",
+    # Adapters
     "BaseAdapter",
     "register_adapter",
     "get_adapter",

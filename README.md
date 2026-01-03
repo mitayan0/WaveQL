@@ -1,7 +1,7 @@
 # WaveQL
 
 <p align="center">
-  <img src="assets/logo.png" width="200" alt="WaveQL Logo" />
+  <img src="assets/WaveQL.png" width="400" alt="WaveQL Logo" />
 </p>
 
 <p align="center">

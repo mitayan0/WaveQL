@@ -281,6 +281,34 @@ class BaseAdapter(ABC):
             Number of rows deleted
         """
         raise NotImplementedError(f"{self.adapter_name} does not support DELETE")
+
+    async def insert_async(
+        self,
+        table: str,
+        values: Dict[str, Any],
+        parameters: Sequence = None,
+    ) -> int:
+        """Insert a record (async)."""
+        raise NotImplementedError(f"{self.adapter_name} does not support insert_async")
+
+    async def update_async(
+        self,
+        table: str,
+        values: Dict[str, Any],
+        predicates: List["Predicate"] = None,
+        parameters: Sequence = None,
+    ) -> int:
+        """Update records (async)."""
+        raise NotImplementedError(f"{self.adapter_name} does not support update_async")
+
+    async def delete_async(
+        self,
+        table: str,
+        predicates: List["Predicate"] = None,
+        parameters: Sequence = None,
+    ) -> int:
+        """Delete records (async)."""
+        raise NotImplementedError(f"{self.adapter_name} does not support delete_async")
     
     def execute_batch(
         self,
@@ -316,7 +344,7 @@ class BaseAdapter(ABC):
                 return cached.columns
         return None
     
-    def _cache_schema(self, table: str, columns: List["ColumnInfo"], ttl: int = 3600):
+    def _cache_schema(self, table: str, columns: List["ColumnInfo"], ttl: int = 3600) -> None:
         """Cache discovered schema."""
         if self._schema_cache:
             self._schema_cache.set(self.adapter_name, table, columns, ttl)
@@ -349,3 +377,6 @@ class BaseAdapter(ABC):
         """
         return self._rate_limiter.execute_with_retry(request_func, *args, **kwargs)
 
+    def __repr__(self) -> str:
+        """String representation for debugging."""
+        return f"<{self.__class__.__name__} host={self._host} pool={self._use_connection_pool}>"
