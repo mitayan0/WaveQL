@@ -61,8 +61,9 @@ class ParallelFetcher:
                         records = future.result()
                         all_records.extend(records)
                     except Exception as e:
-                        # Log and continue
-                        pass
+                        # Log and re-raise to indicate failure
+                        logger.error(f"Error fetching page {page_num}: {e}")
+                        raise
             else:
                 # Unknown total - fetch until empty
                 page = start_page
@@ -91,8 +92,12 @@ class ParallelFetcher:
                                     f.cancel()
                                 active_futures = set()
                                 break
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            # Propagate exception
+                            for f in active_futures:
+                                f.cancel()
+                            logger.error(f"Error in parallel fetch at page {page}: {e}")
+                            raise
         
         return self._records_to_arrow(all_records)
     

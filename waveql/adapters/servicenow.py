@@ -170,10 +170,22 @@ class ServiceNowAdapter(BaseAdapter):
         return self._to_arrow(records, schema_columns, columns)
 
     def _extract_table_name(self, table: str) -> str:
-        """Extract table name from schema.table format."""
+        """Extract table name from schema.table format and strip quotes."""
+        if not table:
+            return table
         if "." in table:
-            return table.split(".", 1)[1]
-        return table
+            table = table.rsplit(".", 1)[1]
+        return table.strip('"')
+
+    def _clean_column_name(self, col: str) -> str:
+        """
+        Clean a column name by stripping quotes and table prefixes/aliases.
+        """
+        if not col or col == "*":
+            return col
+        if "." in col:
+            col = col.rsplit(".", 1)[1]
+        return col.strip('"')
     
     def _build_query_params(
         self,
@@ -192,14 +204,17 @@ class ServiceNowAdapter(BaseAdapter):
 
         # Column selection
         if columns and columns != ["*"]:
-            params["sysparm_fields"] = ",".join(columns)
+            params["sysparm_fields"] = ",".join(self._clean_column_name(c) for c in columns)
         
         # Predicate pushdown
         if predicates:
             query_parts = []
             for pred in predicates:
-                query_parts.append(self._predicate_to_query(pred))
-            params["sysparm_query"] = "^".join(query_parts)
+                sql_pred = self._predicate_to_query(pred)
+                if sql_pred:
+                    query_parts.append(sql_pred)
+            if query_parts:
+                params["sysparm_query"] = "^".join(query_parts)
         
         # Pagination
         if limit:
@@ -215,7 +230,7 @@ class ServiceNowAdapter(BaseAdapter):
             order_parts = []
             for col, direction in order_by:
                 prefix = "" if direction == "ASC" else "DESC"
-                order_parts.append(f"{prefix}{col}")
+                order_parts.append(f"{prefix}{self._clean_column_name(col)}")
             params["sysparm_query"] = params.get("sysparm_query", "") + \
                                       ("^" if params.get("sysparm_query") else "") + \
                                       f"ORDERBY{','.join(order_parts)}"
@@ -224,7 +239,7 @@ class ServiceNowAdapter(BaseAdapter):
     
     def _predicate_to_query(self, pred: "Predicate") -> str:
         """Convert predicate to ServiceNow query syntax."""
-        col = pred.column
+        col = self._clean_column_name(pred.column)
         op = pred.operator
         val = pred.value
         
@@ -247,8 +262,10 @@ class ServiceNowAdapter(BaseAdapter):
         if op in ("IS NULL", "IS NOT NULL"):
             return f"{col}{sn_op}"
         elif op == "LIKE":
-            # Convert SQL LIKE to ServiceNow LIKE
-            return f"{col}LIKE{val}"
+            # Convert SQL LIKE to ServiceNow LIKE (contains)
+            # Strip % wildcards as ServiceNow LIKE is a simple contains
+            clean_val = str(val).strip("%")
+            return f"{col}LIKE{clean_val}"
         elif op == "IN":
             # ServiceNow IN syntax
             if isinstance(val, (list, tuple)):
@@ -700,7 +717,7 @@ class ServiceNowAdapter(BaseAdapter):
         data = response.json()
             
         result = data.get("result", [])
-        return self._process_stats_result(result, limit)
+        return self._process_stats_result(result, limit, aggregates)
 
     def _build_stats_params(self, predicates, group_by, aggregates, order_by) -> Dict:
         """Helper to build stats params (moved out of _fetch_stats)."""
@@ -720,11 +737,11 @@ class ServiceNowAdapter(BaseAdapter):
                  elif func == "MIN": params["sysparm_min_fields"] = params.get("sysparm_min_fields", "") + ("," if "sysparm_min_fields" in params else "") + col
                  elif func == "MAX": params["sysparm_max_fields"] = params.get("sysparm_max_fields", "") + ("," if "sysparm_max_fields" in params else "") + col
         if order_by:
-            cols = [col for col, _ in order_by]
+            cols = [self._clean_column_name(col) for col, _ in order_by]
             params["sysparm_order_by"] = ",".join(cols)
         return params
 
-    def _process_stats_result(self, result: Any, limit: int = None) -> pa.Table:
+    def _process_stats_result(self, result: Any, limit: int = None, aggregates: List[Any] = None) -> pa.Table:
         """Helper to process stats result JSON (moved out of _fetch_stats)."""
         if isinstance(result, dict):
             result = [result]
@@ -735,15 +752,30 @@ class ServiceNowAdapter(BaseAdapter):
             for grp in item.get("groupby_fields", []):
                 row[grp["field"]] = grp["value"]
             if "count" in stats:
-                row["count"] = int(stats["count"])
+                # Find alias for COUNT if exists
+                alias = "count"
+                if aggregates:
+                    for agg in aggregates:
+                        if agg.func.upper() == "COUNT":
+                            alias = agg.alias or f"COUNT({agg.column})"
+                            break
+                row[alias] = int(stats["count"])
             for agg_type in ["sum", "avg", "min", "max"]:
                 if agg_type in stats:
                     for field, val in stats[agg_type].items():
-                        col_name = f"{agg_type.upper()}({field})"
+                        # Find alias
+                        alias = f"{agg_type.upper()}({field})"
+                        if aggregates:
+                            for agg in aggregates:
+                                if agg.func.upper() == agg_type.upper() and self._clean_column_name(agg.column) == self._clean_column_name(field):
+                                    if agg.alias:
+                                        alias = agg.alias
+                                    break
+                        
                         try:
-                            row[col_name] = float(val) if val else None
+                            row[alias] = float(val) if val else None
                         except ValueError:
-                             row[col_name] = val
+                             row[alias] = val
             rows.append(row)
         if limit and rows:
             rows = rows[:limit]
@@ -763,7 +795,7 @@ class ServiceNowAdapter(BaseAdapter):
         with self._get_session() as session:
             response = session.get(url, params=params, headers=headers)
             response.raise_for_status()
-            return self._process_stats_result(response.json().get("result", []), limit)
+            return self._process_stats_result(response.json().get("result", []), limit, aggregates)
 
     async def _fetch_attachment_content_async(self, predicates: List["Predicate"]) -> pa.Table:
         """Fetch binary content from the Attachment API (async)."""
