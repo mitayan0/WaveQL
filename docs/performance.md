@@ -42,7 +42,19 @@ WaveQL handles pagination automatically, but you can tune the batch size.
 conn = waveql.connect(..., page_size=1000)
 ```
 
-## 4. Connection Pooling
+## 4. Parallel Fetching (ServiceNow)
+For large datasets, the ServiceNow adapter automatically triggers parallel fetching (fetching multiple pages concurrently) when requesting more data than a single page.
+*   **Default**: 4 worker threads.
+*   **Tuning**: Increase `max_parallel` for higher throughput on high-bandwidth connections.
+
+```python
+conn = waveql.connect(
+    "servicenow://...",
+    max_parallel=10
+)
+```
+
+## 5. Connection Pooling
 WaveQL uses a persistent `httpx.Client` session. Re-using the `WaveQLConnection` object across multiple queries allows you to re-use the underlying TCP connection (Keep-Alive), saving SSL handshake time.
 
 ```python
@@ -54,7 +66,7 @@ for i in range(10):
     conn.execute(...)
 ```
 
-## 5. Async for Concurrency
+## 6. Async for Concurrency
 If you need to query multiple tables or instances, use the `async` interface.
 
 ```python

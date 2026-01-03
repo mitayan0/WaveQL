@@ -26,6 +26,7 @@ Built for data engineers and developers, it translates your SQL queries into opt
 
 *   **Universal Adapter System**: Connect to ServiceNow, Salesforce, Jira, or generic REST APIs with a unified interface.
 *   **Intelligent Query Pushdown**: We don't just fetch all data. `WHERE` clauses are translated into native API filters (e.g., JQL, SOQL) for maximum performance.
+*   **Change Data Capture (CDC)**: Real-time streaming of table changes (Inserts, Updates) directly from your SaaS apps.
 *   **Cross-Source JOINs**: Seamlessly join data between your local CSVs, a Jira backlog, and ServiceNow incidents using our DuckDB-powered engine.
 *   **Async Built-in**: Built on `httpx` and `anyio` for high-concurrency, non-blocking applications.
 *   **Data Science Ready**: Native integrations with Pandas, PyArrow, and SQLAlchemy (works with Superset!).
@@ -77,27 +78,24 @@ df = cursor.fetchall().to_df()
 print(df.head())
 ```
 
-### 2. Async Support
+### 2. Async Support & CDC
 
-Building a modern FastAPI or async app? We've got you covered.
+Building a modern event-driven app?
 
 ```python
 import asyncio
 from waveql import connect_async
 
 async def main():
-    conn = await connect_async(
-        "jira://your-domain.atlassian.net",
-        username="user@example.com",
-        password="api-token"
-    )
-    
-    cursor = conn.cursor()
-    # Predicates are pushed down to JQL!
-    await cursor.execute("SELECT key, summary FROM issues WHERE project = 'PROJ'")
-    
-    results = await cursor.fetchall()
-    print(results)
+    async with await connect_async("servicenow://...") as conn:
+        # 1. Async Query
+        cursor = conn.cursor()
+        await cursor.execute("SELECT count(*) FROM incident")
+        print(await cursor.fetchone())
+        
+        # 2. Stream Changes (CDC)
+        async for change in conn.stream_changes("incident"):
+            print(f"Update on {change.key}: {change.operation}")
 
 asyncio.run(main())
 ```
@@ -122,9 +120,9 @@ conn.execute("""
 
 | Adapter | URI Scheme | Features |
 |:--------|:-----------|:---------|
-| **ServiceNow** | `servicenow://` | Table API, Aggregates, Write (CRUD) |
-| **Salesforce** | `salesforce://` | SOQL Pushdown, Bulk API support |
-| **Jira** | `jira://` | JQL Pushdown, Pagination |
+| **ServiceNow** | `servicenow://` | Table API, **Aggregates** (SUM/COUNT/AVG), CDC, CRUD |
+| **Salesforce** | `salesforce://` | SOQL Pushdown, Bulk API support, CRUD |
+| **Jira** | `jira://` | JQL Pushdown, Pagination, CRUD |
 | **REST** | `rest://` | Generic JSON querying |
 | **File** | `file://` | CSV, Parquet, JSON (via DuckDB) |
 
@@ -142,6 +140,7 @@ SELECT * FROM servicenow."incident"
 
 **Supports:** `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `JOIN`, `GROUP BY`, `ORDER BY`, `LIMIT`, `OFFSET`
 
+
 ## Authentication
 
 WaveQL takes the headache out of auth headers.
@@ -155,9 +154,9 @@ from waveql.auth import AuthManager
 
 # OAuth2 Example
 auth = AuthManager(
-    oauth2_token_url="https://login.salesforce.com/services/oauth2/token",
-    client_id="your_client_id",
-    client_secret="your_client_secret"
+    oauth_token_url="https://login.salesforce.com/services/oauth2/token",
+    oauth_client_id="your_client_id",
+    oauth_client_secret="your_client_secret"
 )
 conn = waveql.connect("salesforce://login.salesforce.com", auth_manager=auth)
 ```

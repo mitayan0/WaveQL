@@ -98,3 +98,9 @@ WaveQL is optimized for high-throughput environments.
 WaveQL normalizes all API responses into **Apache Arrow** tables.
 *   **Why Arrow?** It provides a columnar memory format that is standard across modern data tools (Pandas, Polars, Spark).
 *   **Type Consistency**: Adapters are responsible for mapping API-specific types (e.g., ServiceNow `GlideDateTime`) to standard Arrow timestamps.
+
+### 5. Change Data Capture (CDC) Architecture
+The CDC module (`waveql.cdc`) allows for real-time data streaming.
+1.  **Providers**: Each adapter implements a CDC Provider (e.g., `ServiceNowCDCProvider`) that defines the strategy for detecting changes (Polling vs Webhooks).
+2.  **State Management**: The stream maintains a cursor (timestamp or ID) to ensure reliable resumption after restart.
+3.  **Unified Interface**: The `CDCStream` normalizes events into a standard `Change` object (Insert/Update/Delete) regardless of the source API.

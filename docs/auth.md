@@ -29,11 +29,12 @@ auth = AuthManager(
     api_key_header="X-API-Key"
 )
 
-# API Key as Bearer token
-auth = AuthManager(
+# API Key as Bearer token (Use specific manager for prefixes)
+from waveql.auth import APIKeyAuthManager
+auth = APIKeyAuthManager(
     api_key="my-jwt-token",
-    api_key_header="Authorization",
-    api_key_prefix="Bearer"
+    header_name="Authorization",
+    prefix="Bearer "
 )
 ```
 
@@ -47,10 +48,10 @@ WaveQL will automatically:
 
 ```python
 auth = AuthManager(
-    oauth2_token_url="https://login.salesforce.com/services/oauth2/token",
-    client_id="consumer-key",
-    client_secret="consumer-secret",
-    scope="full"
+    oauth_token_url="https://login.salesforce.com/services/oauth2/token",
+    oauth_client_id="consumer-key",
+    oauth_client_secret="consumer-secret",
+    oauth_scope="full"
 )
 ```
 
