@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "waveql"
-version = "0.1.1"
+version = "0.1.3"
 description = "Open-source universal Python connector for APIs - Query any data source with SQL"
 readme = "README.md"
 license = "MIT"
@@ -47,9 +47,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/waveql/waveql"
-Documentation = "https://github.com/waveql/waveql#readme"
-Repository = "https://github.com/waveql/waveql"
+Homepage = "https://github.com/mitayan0/WaveQL"
+Documentation = "https://github.com/mitayan0/WaveQL/blob/main/docs/index.md"
+Repository = "https://github.com/mitayan0/WaveQL"
 
 [tool.hatch.build.targets.wheel]
 packages = ["waveql"]

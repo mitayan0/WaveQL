@@ -514,7 +514,7 @@ class TestVersionSync:
     def test_version_is_set(self):
         """Test that version is properly set."""
         assert hasattr(waveql, '__version__')
-        assert waveql.__version__ == "0.1.1"
+        assert waveql.__version__ == "0.1.3"
 
 
 if __name__ == "__main__":
