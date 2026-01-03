@@ -52,6 +52,33 @@ One of WaveQL's most critical features is its ability to "push down" SQL `WHERE`
     *   For **Jira**, `WHERE project = 'PROJ'` becomes `project = "PROJ"` (JQL).
     *   For **ServiceNow**, `WHERE priority < 3` becomes `priority<3` (sysparm_query).
 
+### SQL Identifier Support
+
+WaveQL supports both **quoted** and **unquoted** SQL identifiers for schema and table names. This provides maximum compatibility with different SQL clients and tools.
+
+**Supported Formats:**
+
+| Format | Example | Description |
+|:-------|:--------|:------------|
+| Simple table | `incident` | Unquoted table name |
+| Schema-qualified | `servicenow.incident` | Unquoted schema prefix |
+| Quoted table | `"incident"` | Table name with quotes |
+| Fully quoted | `"servicenow"."incident"` | Both schema and table quoted |
+| Mixed | `servicenow."incident"` | Unquoted schema, quoted table |
+
+**Example Queries:**
+```sql
+-- All of these are equivalent:
+SELECT * FROM incident
+SELECT * FROM servicenow.incident
+SELECT * FROM "servicenow"."incident"
+SELECT * FROM servicenow."incident"
+```
+
+**Key Behaviors:**
+1.  **Schema Resolution**: The schema prefix (e.g., `servicenow`) is used to route the query to the correct adapter. Quotes are automatically stripped during adapter lookup.
+2.  **Table Name Cleaning**: Adapters receive a clean table name without quotes or schema prefixes (e.g., `incident`), ensuring compatibility with the underlying API.
+
 ### 3. Virtual Joins (DuckDB Engine)
 APIs do not support SQL `JOIN` operations natively. WaveQL solves this by embedding an in-memory **DuckDB** instance.
 

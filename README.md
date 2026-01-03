@@ -128,6 +128,20 @@ conn.execute("""
 | **REST** | `rest://` | ⚠️ Generic JSON querying |
 | **File** | `file://` | ✅ CSV, Parquet, JSON (via DuckDB) |
 
+## 📝 SQL Syntax Support
+
+WaveQL supports ANSI SQL with full compatibility for **schema-qualified** and **quoted identifiers**:
+
+```sql
+-- All of these are equivalent and fully supported:
+SELECT * FROM incident
+SELECT * FROM servicenow.incident
+SELECT * FROM "servicenow"."incident"
+SELECT * FROM servicenow."incident"
+```
+
+**Supports:** `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `JOIN`, `GROUP BY`, `ORDER BY`, `LIMIT`, `OFFSET`
+
 ## 🔐 Authentication
 
 WaveQL takes the headache out of auth headers.

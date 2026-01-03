@@ -120,15 +120,39 @@ class WaveQLCursor:
         
         return self
     
+    def _clean_table_name(self, table_name: str) -> str:
+        """
+        Clean a table name by stripping quotes and extracting just the table portion.
+        
+        Examples:
+            '"servicenow"."incident"' -> 'incident'
+            'servicenow.incident'      -> 'incident'
+            '"incident"'               -> 'incident'
+            'incident'                 -> 'incident'
+        """
+        if not table_name:
+            return table_name
+        
+        # If there's a schema prefix, extract just the table name
+        if "." in table_name:
+            _, table_part = table_name.rsplit(".", 1)
+        else:
+            table_part = table_name
+        
+        # Strip surrounding quotes
+        return table_part.strip('"')
+    
     def _resolve_adapter(self, query_info):
         """Determine which adapter handles this query based on table name."""
         table_name = query_info.table
         if not table_name:
             return None
         
-        # Check for schema prefix (e.g., "sales.Account")
+        # Check for schema prefix (e.g., "sales.Account" or "servicenow"."incident")
         if "." in table_name:
             schema, _ = table_name.split(".", 1)
+            # Strip quotes from schema name for lookup
+            schema = schema.strip('"')
             adapter = self._connection.get_adapter(schema)
             if adapter:
                 return adapter
@@ -138,11 +162,14 @@ class WaveQLCursor:
     
     def _execute_via_adapter(self, query_info, adapter, parameters) -> pa.Table:
         """Execute query via adapter with predicate pushdown."""
+        # Clean the table name to remove schema prefix and quotes for the adapter
+        clean_table = self._clean_table_name(query_info.table)
+        
         # Let adapter fetch data with pushed-down predicates
         if query_info.operation == "SELECT":
             try:
                 data = adapter.fetch(
-                    table=query_info.table,
+                    table=clean_table,
                     columns=query_info.columns,
                     predicates=query_info.predicates,
                     limit=query_info.limit,
@@ -159,7 +186,7 @@ class WaveQLCursor:
                 
                 # Fetch raw data with predicates pushed down
                 raw_data = adapter.fetch(
-                    table=query_info.table,
+                    table=clean_table,
                     columns=None, 
                     predicates=query_info.predicates
                     # Limit/Offset/Order apply to result, so we apply them in local SQL
@@ -189,7 +216,7 @@ class WaveQLCursor:
         
         elif query_info.operation == "INSERT":
             self._rowcount = adapter.insert(
-                table=query_info.table,
+                table=clean_table,
                 values=query_info.values,
                 parameters=parameters,
             )
@@ -197,7 +224,7 @@ class WaveQLCursor:
         
         elif query_info.operation == "UPDATE":
             self._rowcount = adapter.update(
-                table=query_info.table,
+                table=clean_table,
                 values=query_info.values,
                 predicates=query_info.predicates,
                 parameters=parameters,
@@ -206,7 +233,7 @@ class WaveQLCursor:
         
         elif query_info.operation == "DELETE":
             self._rowcount = adapter.delete(
-                table=query_info.table,
+                table=clean_table,
                 predicates=query_info.predicates,
                 parameters=parameters,
             )

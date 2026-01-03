@@ -16,9 +16,14 @@ Connects to the ServiceNow Table API.
 
 **Example:**
 ```sql
+-- Simple query
 SELECT number, short_description 
 FROM incident 
 WHERE active = true AND priority IN (1, 2)
+
+-- With explicit schema prefix (both formats work)
+SELECT * FROM servicenow.incident WHERE state = 1
+SELECT * FROM "servicenow"."incident" WHERE state = 1
 ```
 
 ### 2. Salesforce Adapter

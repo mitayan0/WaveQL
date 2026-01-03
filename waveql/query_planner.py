@@ -71,30 +71,34 @@ class QueryPlanner:
     - JOINs (detected for virtual join handling)
     """
     
+    # Pattern to match table names: supports both unquoted (word.word) and quoted ("word"."word")
+    # Quoted identifiers can contain any characters except unescaped quotes
+    TABLE_NAME_PATTERN = r'(?:"[^"]+"|[\w]+)(?:\.(?:"[^"]+"|[\w]+))?'
+    
     # Regex patterns for SQL parsing
     SELECT_PATTERN = re.compile(
-        r"SELECT\s+(.+?)\s+FROM\s+(\w+(?:\.\w+)?)"
+        rf"SELECT\s+(.+?)\s+FROM\s+({TABLE_NAME_PATTERN})"
         r"(?:\s+AS\s+(\w+))?"
         r"(?:\s+(.+))?",
         re.IGNORECASE | re.DOTALL
     )
     
     INSERT_PATTERN = re.compile(
-        r"INSERT\s+INTO\s+(\w+(?:\.\w+)?)\s*"
+        rf"INSERT\s+INTO\s+({TABLE_NAME_PATTERN})\s*"
         r"(?:\(([^)]+)\))?\s*"
         r"VALUES\s*\(([^)]+)\)",
         re.IGNORECASE
     )
     
     UPDATE_PATTERN = re.compile(
-        r"UPDATE\s+(\w+(?:\.\w+)?)\s+"
+        rf"UPDATE\s+({TABLE_NAME_PATTERN})\s+"
         r"SET\s+(.+?)"
         r"(?:\s+WHERE\s+(.+))?$",
         re.IGNORECASE | re.DOTALL
     )
     
     DELETE_PATTERN = re.compile(
-        r"DELETE\s+FROM\s+(\w+(?:\.\w+)?)"
+        rf"DELETE\s+FROM\s+({TABLE_NAME_PATTERN})"
         r"(?:\s+WHERE\s+(.+))?$",
         re.IGNORECASE
     )
@@ -104,7 +108,7 @@ class QueryPlanner:
     ORDER_PATTERN = re.compile(r"ORDER\s+BY\s+(.+?)(?:\s+LIMIT|\s+OFFSET|$)", re.IGNORECASE)
     LIMIT_PATTERN = re.compile(r"LIMIT\s+(\d+)", re.IGNORECASE)
     OFFSET_PATTERN = re.compile(r"OFFSET\s+(\d+)", re.IGNORECASE)
-    JOIN_PATTERN = re.compile(r"(LEFT\s+|RIGHT\s+|INNER\s+|OUTER\s+)?JOIN\s+(\w+(?:\.\w+)?)", re.IGNORECASE)
+    JOIN_PATTERN = re.compile(rf"(LEFT\s+|RIGHT\s+|INNER\s+|OUTER\s+)?JOIN\s+({TABLE_NAME_PATTERN})", re.IGNORECASE)
     AGG_PATTERN = re.compile(r"^\s*(COUNT|SUM|AVG|MIN|MAX)\s*\((.+?)\)(?:\s+AS\s+(\w+))?\s*$", re.IGNORECASE)
     
     def parse(self, sql: str) -> QueryInfo:
