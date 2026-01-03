@@ -6,6 +6,7 @@ import pytest
 import pyarrow as pa
 import tempfile
 import csv
+import threading
 from pathlib import Path
 
 import waveql
@@ -13,6 +14,7 @@ from waveql.query_planner import QueryPlanner, Predicate
 
 from waveql.schema_cache import SchemaCache, ColumnInfo
 from waveql.adapters.base import BaseAdapter
+from waveql.connection_base import ConnectionMixin
 from typing import Any, List
 
 
@@ -119,6 +121,50 @@ class TestSchemaCache:
         
         assert schema is None
         cache.close()
+    
+    def test_concurrent_access(self):
+        """Test concurrent read/write operations for thread safety."""
+        cache = SchemaCache()
+        errors = []
+        
+        def writer(thread_id):
+            try:
+                for i in range(100):
+                    cache.set(
+                        f"adapter_{thread_id}", 
+                        f"table_{i}", 
+                        [ColumnInfo(name=f"col_{i}", data_type="string")]
+                    )
+            except Exception as e:
+                errors.append(e)
+        
+        def reader(thread_id):
+            try:
+                for i in range(100):
+                    cache.get(f"adapter_{thread_id}", f"table_{i}")
+                    cache.list_tables(f"adapter_{thread_id}")
+            except Exception as e:
+                errors.append(e)
+        
+        threads = []
+        for i in range(5):
+            threads.append(threading.Thread(target=writer, args=(i,)))
+            threads.append(threading.Thread(target=reader, args=(i,)))
+        
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        
+        assert len(errors) == 0, f"Errors occurred: {errors}"
+        cache.close()
+    
+    def test_schema_cache_repr(self):
+        """Test SchemaCache __repr__."""
+        cache = SchemaCache()
+        repr_str = repr(cache)
+        assert "<SchemaCache" in repr_str
+        cache.close()
 
 
 class TestFileAdapter:
@@ -219,6 +265,106 @@ class TestConnection:
             conn.close()
         finally:
             Path(temp_path).unlink()
+    
+    def test_ping_healthy_connection(self):
+        """Test ping() returns True for healthy connection."""
+        conn = waveql.connect()
+        assert conn.ping() is True
+        conn.close()
+    
+    def test_ping_closed_connection(self):
+        """Test ping() returns False for closed connection."""
+        conn = waveql.connect()
+        conn.close()
+        assert conn.ping() is False
+    
+    def test_is_closed_property(self):
+        """Test is_closed property."""
+        conn = waveql.connect()
+        assert conn.is_closed is False
+        conn.close()
+        assert conn.is_closed is True
+    
+    def test_connection_repr(self):
+        """Test connection __repr__."""
+        conn = waveql.connect()
+        repr_str = repr(conn)
+        assert "<WaveQLConnection" in repr_str
+        assert "status=open" in repr_str
+        conn.close()
+        repr_str = repr(conn)
+        assert "status=closed" in repr_str
+    
+    def test_cursor_repr(self):
+        """Test cursor __repr__."""
+        temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, newline='')
+        temp_path = temp_file.name
+        writer = csv.writer(temp_file)
+        writer.writerow(["id"])
+        writer.writerow([1])
+        writer.writerow([2])
+        temp_file.flush()
+        temp_file.close()
+        
+        try:
+            conn = waveql.connect(f"file://{temp_path}")
+            cursor = conn.cursor()
+            
+            repr_str = repr(cursor)
+            assert "<WaveQLCursor" in repr_str
+            assert "status=open" in repr_str
+            
+            cursor.execute("SELECT * FROM data")
+            repr_str = repr(cursor)
+            assert "rows=2" in repr_str
+            
+            cursor.close()
+            repr_str = repr(cursor)
+            assert "status=closed" in repr_str
+            
+            conn.close()
+        finally:
+            Path(temp_path).unlink()
+    
+    def test_fetchmany(self):
+        """Test fetchmany() method."""
+        temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, newline='')
+        temp_path = temp_file.name
+        writer = csv.writer(temp_file)
+        writer.writerow(["id"])
+        for i in range(10):
+            writer.writerow([i])
+        temp_file.flush()
+        temp_file.close()
+        
+        try:
+            conn = waveql.connect(f"file://{temp_path}")
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM data")
+            
+            rows = cursor.fetchmany(3)
+            assert len(rows) == 3
+            
+            rows = cursor.fetchmany(3)
+            assert len(rows) == 3
+            
+            rows = cursor.fetchmany(10)
+            assert len(rows) == 4
+            
+            conn.close()
+        finally:
+            Path(temp_path).unlink()
+    
+    def test_arraysize_property(self):
+        """Test arraysize property getter/setter."""
+        conn = waveql.connect()
+        cursor = conn.cursor()
+        
+        assert cursor.arraysize == 100
+        cursor.arraysize = 50
+        assert cursor.arraysize == 50
+        
+        conn.close()
 
 
 class TestPredicate:
@@ -233,6 +379,14 @@ class TestPredicate:
         pred = Predicate(column="name", operator="LIKE", value="%test%")
         snq = pred.to_api_filter("servicenow")
         assert "LIKE" in snq
+    
+    def test_predicate_repr(self):
+        """Test Predicate __repr__."""
+        pred = Predicate(column="status", operator="=", value="active")
+        repr_str = repr(pred)
+        assert "Predicate" in repr_str
+        assert "status" in repr_str
+        assert "active" in repr_str
 
 
 class TestAggregationFallback:
@@ -283,5 +437,86 @@ class TestAggregationFallback:
         assert rows[1][1] == 5
 
 
+class TestConnectionMixin:
+    """Tests for ConnectionMixin shared functionality."""
+    
+    def test_parse_connection_string_servicenow(self):
+        """Test parsing ServiceNow connection string."""
+        result = ConnectionMixin.parse_connection_string("servicenow://myinstance.service-now.com")
+        assert result["adapter"] == "servicenow"
+        assert result["host"] == "myinstance.service-now.com"
+    
+    def test_parse_connection_string_file(self):
+        """Test parsing file:// connection string."""
+        result = ConnectionMixin.parse_connection_string("file:///path/to/data.csv")
+        assert result["adapter"] == "file"
+        assert result["host"] == "/path/to/data.csv"
+    
+    def test_parse_connection_string_with_params(self):
+        """Test parsing connection string with query parameters."""
+        result = ConnectionMixin.parse_connection_string("rest://api.example.com?timeout=30&verify=false")
+        assert result["adapter"] == "rest"
+        assert result["host"] == "api.example.com"
+        assert result["params"]["timeout"] == "30"
+        assert result["params"]["verify"] == "false"
+    
+    def test_extract_oauth_params(self):
+        """Test OAuth parameter extraction."""
+        params = ConnectionMixin.extract_oauth_params(
+            oauth_token_url="https://auth.example.com/token",
+            oauth_client_id="my-client",
+            auth_type="oauth2",
+            other_param="ignored",
+        )
+        
+        assert "oauth_token_url" in params
+        assert "oauth_client_id" in params
+        assert "auth_type" in params
+        assert "other_param" not in params
+
+
+class TestExceptions:
+    """Tests for consolidated exceptions."""
+    
+    def test_all_exceptions_importable(self):
+        """Test that all exceptions can be imported from waveql.exceptions."""
+        from waveql.exceptions import (
+            WaveQLError,
+            ConnectionError,
+            AuthenticationError,
+            QueryError,
+            AdapterError,
+            SchemaError,
+            RateLimitError,
+            PredicatePushdownError,
+            ConfigurationError,
+            TimeoutError,
+        )
+        
+        assert issubclass(ConnectionError, WaveQLError)
+        assert issubclass(AuthenticationError, WaveQLError)
+        assert issubclass(QueryError, WaveQLError)
+        assert issubclass(ConfigurationError, WaveQLError)
+        assert issubclass(TimeoutError, WaveQLError)
+    
+    def test_rate_limit_error_retry_after(self):
+        """Test RateLimitError with retry_after."""
+        from waveql.exceptions import RateLimitError
+        
+        error = RateLimitError("Rate limited", retry_after=60)
+        assert error.retry_after == 60
+        assert "Rate limited" in str(error)
+
+
+class TestVersionSync:
+    """Tests for version consistency."""
+    
+    def test_version_is_set(self):
+        """Test that version is properly set."""
+        assert hasattr(waveql, '__version__')
+        assert waveql.__version__ == "0.1.1"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+

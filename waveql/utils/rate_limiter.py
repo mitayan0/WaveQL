@@ -3,10 +3,17 @@ Rate Limiter - Handles API rate limiting with exponential backoff
 """
 
 from __future__ import annotations
-import time
+import logging
 import random
+import time
+from typing import Any, Awaitable, Callable
+
 import anyio
-from typing import Callable, Any, Awaitable
+import httpx
+
+from waveql.exceptions import RateLimitError
+
+logger = logging.getLogger(__name__)
 
 
 class RateLimiter:
@@ -65,7 +72,6 @@ class RateLimiter:
                 retry_after = None
                 
                 # Check for RateLimitError
-                from waveql.exceptions import RateLimitError
                 if isinstance(e, RateLimitError):
                     should_retry = True
                     retry_after = e.retry_after
@@ -90,6 +96,7 @@ class RateLimiter:
                 else:
                     delay = self._calculate_delay(attempt)
                 
+                logger.debug("Retry attempt %d/%d after %.2fs delay", attempt + 1, self.max_retries, delay)
                 time.sleep(delay)
         
         raise last_exception
@@ -113,7 +120,6 @@ class RateLimiter:
                 should_retry = False
                 retry_after = None
                 
-                from waveql.exceptions import RateLimitError
                 if isinstance(e, RateLimitError):
                     should_retry = True
                     retry_after = e.retry_after
@@ -129,9 +135,8 @@ class RateLimiter:
                                 retry_after = None
 
                 # httpx support
-                import httpx
                 if isinstance(e, httpx.HTTPStatusError):
-                     if e.response.status_code in retry_on:
+                    if e.response.status_code in retry_on:
                         should_retry = True
                         retry_after = e.response.headers.get("Retry-After")
                         if retry_after:
@@ -148,6 +153,7 @@ class RateLimiter:
                 else:
                     delay = self._calculate_delay(attempt)
                 
+                logger.debug("Async retry attempt %d/%d after %.2fs delay", attempt + 1, self.max_retries, delay)
                 await anyio.sleep(delay)
         
         raise last_exception

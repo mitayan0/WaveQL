@@ -4,11 +4,15 @@ Schema Cache - SQLite-based metadata caching for dynamic schema discovery
 
 from __future__ import annotations
 import json
+import logging
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -73,13 +77,18 @@ class SchemaCache:
         Args:
             cache_path: Path to SQLite cache file. None for in-memory.
         """
+        # Thread-safety lock for all database operations
+        self._lock = threading.Lock()
+        
         if cache_path:
             self._db_path = Path(cache_path)
             self._db_path.parent.mkdir(parents=True, exist_ok=True)
-            self._conn = sqlite3.connect(str(self._db_path))
+            # check_same_thread=False allows safe multi-threaded access with our lock
+            self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
         else:
-            self._conn = sqlite3.connect(":memory:")
+            self._conn = sqlite3.connect(":memory:", check_same_thread=False)
         
+        logger.debug("SchemaCache initialized with path: %s", cache_path or ":memory:")
         self._init_tables()
     
     def _init_tables(self):
@@ -110,11 +119,12 @@ class SchemaCache:
         Returns:
             TableSchema if found and not expired, None otherwise
         """
-        cursor = self._conn.execute(
-            "SELECT schema_json, discovered_at, ttl FROM schemas WHERE adapter = ? AND table_name = ?",
-            (adapter, table_name)
-        )
-        row = cursor.fetchone()
+        with self._lock:
+            cursor = self._conn.execute(
+                "SELECT schema_json, discovered_at, ttl FROM schemas WHERE adapter = ? AND table_name = ?",
+                (adapter, table_name)
+            )
+            row = cursor.fetchone()
         
         if not row:
             return None
@@ -146,12 +156,14 @@ class SchemaCache:
             ttl=ttl,
         )
         
-        self._conn.execute(
-            """INSERT OR REPLACE INTO schemas (adapter, table_name, schema_json, discovered_at, ttl)
-               VALUES (?, ?, ?, ?, ?)""",
-            (adapter, table_name, json.dumps(schema.to_dict()), schema.discovered_at, ttl)
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                """INSERT OR REPLACE INTO schemas (adapter, table_name, schema_json, discovered_at, ttl)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (adapter, table_name, json.dumps(schema.to_dict()), schema.discovered_at, ttl)
+            )
+            self._conn.commit()
+        logger.debug("Cached schema for %s.%s (TTL: %ds)", adapter, table_name, ttl)
     
     def invalidate(self, adapter: str, table_name: str = None):
         """
@@ -161,17 +173,20 @@ class SchemaCache:
             adapter: Adapter name
             table_name: Optional specific table. None to invalidate all for adapter.
         """
-        if table_name:
-            self._conn.execute(
-                "DELETE FROM schemas WHERE adapter = ? AND table_name = ?",
-                (adapter, table_name)
-            )
-        else:
-            self._conn.execute(
-                "DELETE FROM schemas WHERE adapter = ?",
-                (adapter,)
-            )
-        self._conn.commit()
+        with self._lock:
+            if table_name:
+                self._conn.execute(
+                    "DELETE FROM schemas WHERE adapter = ? AND table_name = ?",
+                    (adapter, table_name)
+                )
+                logger.debug("Invalidated schema cache for %s.%s", adapter, table_name)
+            else:
+                self._conn.execute(
+                    "DELETE FROM schemas WHERE adapter = ?",
+                    (adapter,)
+                )
+                logger.debug("Invalidated all schema cache for adapter: %s", adapter)
+            self._conn.commit()
     
     def list_tables(self, adapter: str = None) -> List[str]:
         """
@@ -183,15 +198,16 @@ class SchemaCache:
         Returns:
             List of table names
         """
-        if adapter:
-            cursor = self._conn.execute(
-                "SELECT table_name FROM schemas WHERE adapter = ?",
-                (adapter,)
-            )
-        else:
-            cursor = self._conn.execute("SELECT DISTINCT table_name FROM schemas")
-        
-        return [row[0] for row in cursor.fetchall()]
+        with self._lock:
+            if adapter:
+                cursor = self._conn.execute(
+                    "SELECT table_name FROM schemas WHERE adapter = ?",
+                    (adapter,)
+                )
+            else:
+                cursor = self._conn.execute("SELECT DISTINCT table_name FROM schemas")
+            
+            return [row[0] for row in cursor.fetchall()]
     
     def describe_table(self, adapter: str, table_name: str) -> Optional[List[Dict]]:
         """
@@ -217,4 +233,11 @@ class SchemaCache:
     
     def close(self):
         """Close the cache connection."""
-        self._conn.close()
+        with self._lock:
+            self._conn.close()
+        logger.debug("SchemaCache closed")
+    
+    def __repr__(self) -> str:
+        """String representation for debugging."""
+        path = getattr(self, '_db_path', ':memory:')
+        return f"<SchemaCache path={path}>"

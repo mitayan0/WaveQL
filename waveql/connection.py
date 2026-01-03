@@ -3,22 +3,24 @@ WaveQL Connection - DB-API 2.0 compliant connection class
 """
 
 from __future__ import annotations
-import re
+import logging
 from typing import Any, Dict, Optional, TYPE_CHECKING
-from urllib.parse import urlparse, parse_qs
 
 import duckdb
 
 from waveql.exceptions import ConnectionError, AdapterError
 from waveql.schema_cache import SchemaCache
 from waveql.auth.manager import AuthManager
+from waveql.connection_base import ConnectionMixin
 
 if TYPE_CHECKING:
     from waveql.cursor import WaveQLCursor
     from waveql.adapters.base import BaseAdapter
 
+logger = logging.getLogger(__name__)
 
-class WaveQLConnection:
+
+class WaveQLConnection(ConnectionMixin):
     """
     DB-API 2.0 compliant connection wrapping DuckDB with adapter support.
     
@@ -42,7 +44,7 @@ class WaveQLConnection:
     ):
         # Parse connection string if provided
         if connection_string:
-            parsed = self._parse_connection_string(connection_string)
+            parsed = self.parse_connection_string(connection_string)
             adapter = adapter or parsed.get("adapter")
             host = host or parsed.get("host")
             # Merge parsed kwargs
@@ -59,22 +61,13 @@ class WaveQLConnection:
         # Initialize schema cache
         self._schema_cache = SchemaCache()
         
-        # Extract OAuth parameters
-        oauth_params = {k: v for k, v in kwargs.items() 
-                        if k.startswith("oauth_") or k.startswith("auth_")}
-        
-        # Initialize auth manager
-        self._auth_manager = AuthManager(
+        # Extract OAuth parameters and create auth manager
+        oauth_params = self.extract_oauth_params(**kwargs)
+        self._auth_manager = self.create_auth_manager_from_params(
             username=username,
             password=password,
             api_key=api_key,
             oauth_token=oauth_token,
-            oauth_token_url=oauth_params.get("oauth_token_url"),
-            oauth_client_id=oauth_params.get("oauth_client_id"),
-            oauth_client_secret=oauth_params.get("oauth_client_secret"),
-            oauth_grant_type=oauth_params.get("oauth_grant_type", "client_credentials"),
-            oauth_refresh_token=oauth_params.get("oauth_refresh_token"),
-            oauth_scope=oauth_params.get("oauth_scope"),
             **oauth_params
         )
         
@@ -84,26 +77,8 @@ class WaveQLConnection:
         # If adapter specified, initialize it
         if adapter:
             self._init_default_adapter(adapter, host, **kwargs)
-    
-    def _parse_connection_string(self, conn_str: str) -> Dict[str, Any]:
-        """Parse URI-style connection string."""
-        # Handle file:// URLs
-        if conn_str.startswith("file://"):
-            return {
-                "adapter": "file",
-                "host": conn_str[7:],  # Remove file://
-                "params": {}
-            }
         
-        # Parse adapter://host format
-        parsed = urlparse(conn_str)
-        params = {k: v[0] if len(v) == 1 else v for k, v in parse_qs(parsed.query).items()}
-        
-        return {
-            "adapter": parsed.scheme,
-            "host": parsed.netloc or parsed.path,
-            "params": params
-        }
+        logger.debug("WaveQLConnection created: adapter=%s, host=%s", adapter, host)
     
     def _init_default_adapter(self, adapter_name: str, host: str, **kwargs):
         """Initialize the default adapter based on connection parameters."""
@@ -154,12 +129,33 @@ class WaveQLConnection:
         """Rollback current transaction (no-op for most API adapters)."""
         pass
     
+    def ping(self) -> bool:
+        """
+        Test if the connection is alive.
+        
+        Returns:
+            True if connection is healthy, False otherwise
+        """
+        if self._closed:
+            return False
+        try:
+            self._duckdb.execute("SELECT 1")
+            return True
+        except Exception:
+            return False
+    
+    @property
+    def is_closed(self) -> bool:
+        """Check if connection is closed."""
+        return self._closed
+    
     def close(self):
         """Close the connection and release resources."""
         if not self._closed:
             self._duckdb.close()
             self._schema_cache.close()
             self._closed = True
+            logger.debug("WaveQLConnection closed")
     
     def __enter__(self):
         return self
@@ -182,3 +178,8 @@ class WaveQLConnection:
     def auth_manager(self) -> AuthManager:
         """Access auth manager."""
         return self._auth_manager
+    
+    def __repr__(self) -> str:
+        """String representation for debugging."""
+        status = "closed" if self._closed else "open"
+        return f"<WaveQLConnection adapter={self._adapter_name} host={self._host} status={status}>"

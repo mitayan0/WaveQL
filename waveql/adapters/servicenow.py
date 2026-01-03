@@ -38,6 +38,13 @@ class ServiceNowAdapter(BaseAdapter):
     supports_delete = True
     supports_batch = True
     
+    # Configuration defaults (can be overridden in __init__)
+    DEFAULT_PAGE_SIZE = 1000
+    DEFAULT_MAX_PARALLEL = 4
+    DEFAULT_TIMEOUT = 30
+    DEFAULT_SCHEMA_TTL = 3600  # 1 hour
+    DEFAULT_LIST_TABLES_LIMIT = 1000
+    
     # ServiceNow type to Arrow type mapping
     TYPE_MAP = {
         "string": pa.string(),
@@ -56,9 +63,9 @@ class ServiceNowAdapter(BaseAdapter):
         host: str,
         auth_manager=None,
         schema_cache=None,
-        page_size: int = 1000,
-        max_parallel: int = 4,
-        timeout: int = 30,
+        page_size: int = None,
+        max_parallel: int = None,
+        timeout: int = None,
         display_value: str | bool = False,
         **kwargs
     ):
@@ -69,9 +76,10 @@ class ServiceNowAdapter(BaseAdapter):
         if not self._host.startswith("http"):
             self._host = f"https://{self._host}"
         
-        self._page_size = page_size
-        self._max_parallel = max_parallel
-        self._timeout = timeout
+        # Use class defaults if not provided
+        self._page_size = page_size if page_size is not None else self.DEFAULT_PAGE_SIZE
+        self._max_parallel = max_parallel if max_parallel is not None else self.DEFAULT_MAX_PARALLEL
+        self._timeout = timeout if timeout is not None else self.DEFAULT_TIMEOUT
         self._display_value = display_value
         # Note: HTTP sessions are now managed by the connection pool in BaseAdapter
         # Use self._get_session() context manager or self._get_session_direct() for requests
@@ -79,8 +87,8 @@ class ServiceNowAdapter(BaseAdapter):
         # Initialize parallel fetcher for high-throughput data retrieval
         from waveql.utils.streaming import ParallelFetcher
         self._parallel_fetcher = ParallelFetcher(
-            max_workers=max_parallel,
-            batch_size=page_size,
+            max_workers=self._max_parallel,
+            batch_size=self._page_size,
         )
     
     def fetch(

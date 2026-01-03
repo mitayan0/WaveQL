@@ -5,7 +5,7 @@ Query Planner - SQL parsing and predicate extraction for pushdown using sqlglot
 from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import sqlglot
 from sqlglot import exp
@@ -36,6 +36,10 @@ class Predicate:
                       "LIKE": "LIKE", "IN": "IN"}
             return f"{self.column}{op_map.get(self.operator, '=')}{self.value}"
         return f"{self.column} {self.operator} {self.value}"
+    
+    def __repr__(self) -> str:
+        """String representation for debugging."""
+        return f"Predicate({self.column} {self.operator} {self.value!r})"
 
 
 @dataclass
@@ -44,6 +48,11 @@ class Aggregate:
     func: str  # COUNT, SUM, AVG, MIN, MAX
     column: str
     alias: Optional[str] = None
+
+    def __repr__(self) -> str:
+        """String representation for debugging."""
+        alias_str = f" AS {self.alias}" if self.alias else ""
+        return f"Aggregate({self.func}({self.column}){alias_str})"
 
 
 @dataclass
@@ -58,10 +67,25 @@ class QueryInfo:
     offset: Optional[int] = None
     order_by: List[Tuple[str, str]] = field(default_factory=list)  # [(col, ASC/DESC), ...]
     joins: List[Dict] = field(default_factory=list)
+    aliases: Dict[str, str] = field(default_factory=dict)  # Alias -> Table Name
     group_by: List[str] = field(default_factory=list)
     aggregates: List[Aggregate] = field(default_factory=list)
     raw_sql: str = ""
     is_explain: bool = False
+
+    def __repr__(self) -> str:
+        """String representation for debugging."""
+        parts = [f"QueryInfo({self.operation}"]
+        if self.table:
+            parts.append(f" FROM {self.table}")
+        if self.predicates:
+            parts.append(f" WHERE [{len(self.predicates)} predicates]")
+        if self.joins:
+            parts.append(f" [{len(self.joins)} JOINs]")
+        if self.limit:
+            parts.append(f" LIMIT {self.limit}")
+        parts.append(")")
+        return "".join(parts)
 
 
 class QueryPlanner:
@@ -127,9 +151,11 @@ class QueryPlanner:
         ctes = {step.alias for step in expression.find_all(exp.CTE)}
         for table in expression.find_all(exp.Table):
             t_name = table.sql()
+            t_alias = table.alias or t_name
             if t_name not in ctes:
-                info.table = t_name
-                break
+                if not info.table:
+                    info.table = t_name
+                info.aliases[t_alias] = t_name
         
         # Fallback to first table if all are CTEs or none found
         all_tables = list(expression.find_all(exp.Table))
@@ -138,10 +164,21 @@ class QueryPlanner:
 
         # 2. Joins
         for join in expression.find_all(exp.Join):
-            info.joins.append({
+            t_node = join.this
+            t_name = t_node.sql()
+            # If join.this is a Table, it might have an alias
+            if isinstance(t_node, exp.Table):
+                t_alias = t_node.alias or t_name
+                info.aliases[t_alias] = t_name
+            
+            join_info = {
                 "type": join.args.get("kind", "INNER").upper(),
-                "table": join.this.sql()
-            })
+                "table": t_name,
+            }
+            on_condition = join.args.get("on")
+            if on_condition:
+                join_info["on"] = self._parse_condition(on_condition)
+            info.joins.append(join_info)
 
         # 3. Columns & Aggregates
         info.columns = []
@@ -248,7 +285,7 @@ class QueryPlanner:
         
         return predicates
 
-    def _extract_literal(self, expression: exp.Expression) -> Any:
+    def _extract_literal(self, expression: exp.Expression) -> Union[str, int, float, bool, None, ParameterPlaceholder]:
         """Extract a Python value from a sqlglot expression."""
         if isinstance(expression, exp.Literal):
             if expression.is_number:
