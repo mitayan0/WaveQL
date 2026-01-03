@@ -67,6 +67,22 @@
 
 ## 🚧 In Progress (v0.2.0)
 
+### Materialized Views ✅ NEW
+- [x] **Materialized Views**: Local Parquet snapshots of remote tables
+  - [x] `CREATE MATERIALIZED VIEW` support
+  - [x] Full and incremental refresh strategies
+  - [x] SQLite-based view registry
+  - [x] Automatic DuckDB integration
+- [x] **Incremental Sync**: Managed syncing based on timestamps (e.g., `sys_updated_on`)
+
+### Change Data Capture (CDC) ✅ NEW
+- [x] **Real-Time CDC**: Stream changes from APIs
+  - [x] `stream_changes()` async iterator
+  - [x] `get_changes()` one-shot fetching
+  - [x] Provider support: ServiceNow, Salesforce, Jira
+  - [x] Configurable polling intervals
+  - [x] Change type detection (insert/update/delete)
+
 ### Query Optimizer Enhancements
 - [ ] Complex predicate extraction (nested `OR` support)
 - [ ] Subquery pushdown for single-adapter sources
@@ -79,9 +95,9 @@
 
 ## 📋 Planned Features
 
-### v0.3.0 - Caching & Durability
-- [ ] **Materialized Views**: Local Parquet snapshots of remote tables
-- [ ] **Incremental Sync Utility**: Managed syncing based on timestamps (e.g., `sys_updated_on`)
+### v0.3.0 - Data Contracts & Validation
+- [ ] **Data Contracts**: YAML-based schema validation
+- [ ] **Schema Change Detection**: Alert on API schema changes
 
 ### v0.4.0 - Streaming & Scalability
 - [ ] Generator-based streaming for large result sets (RecordBatch yielding)

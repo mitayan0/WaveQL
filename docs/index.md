@@ -31,8 +31,17 @@ Best practices for optimizing query performance and minimizing API usage.
 *   [Memory Management](performance.md#memory)
 *   [Async Concurrency](performance.md#concurrency)
 
+### [Tutorial](tutorial.md)
+Step-by-step guide to getting started with WaveQL, handling queries, and using advanced features like CDC.
+
 ### [API Reference](api.md)
 Comprehensive class and function reference for the WaveQL SDK.
+
+### [Change Data Capture (CDC)](cdc.md)
+Real-time streaming of data changes from your sources.
+*   [Streaming Concepts](cdc.md#concepts)
+*   [Configuration](cdc.md#configuration)
+*   [Async Integration](cdc.md#async)
 
 ---
 

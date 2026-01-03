@@ -12,7 +12,10 @@ Connects to the ServiceNow Table API.
     *   Full `sysparm_query` support for filtering.
     *   Field selection (`sysparm_fields`).
     *   Limit/Offset pagination.
-    *   `Stats` API support for `COUNT`, `MIN`, `MAX`, `AVG`, `SUM`.
+    *   **Aggregation Pushdown**: `COUNT`, `MIN`, `MAX`, `AVG`, `SUM` are executed on the server via the Stats API.
+    *   **Change Data Capture**: Stream `insert`/`update` events in real-time.
+    *   **Write Support**: `INSERT`, `UPDATE`, `DELETE` operations.
+    *   **Parallel Fetching**: Automatically fetches pages in parallel for large datasets.
 
 **Example:**
 ```sql
