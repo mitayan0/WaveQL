@@ -217,7 +217,7 @@ class RESTAdapter(BaseAdapter):
         return filtered
     
     def _get_or_discover_schema(self, table: str, records: List[Dict]) -> List[ColumnInfo]:
-        """Discover schema from records."""
+        """Discover schema from records using multi-sample inference with struct support."""
         cached = self._get_cached_schema(table)
         if cached:
             return cached
@@ -225,25 +225,37 @@ class RESTAdapter(BaseAdapter):
         if not records:
             return []
         
+        # Use new schema inference utility for robust multi-sample detection
+        from waveql.utils.schema import infer_schema_from_records
+        
+        arrow_schema = infer_schema_from_records(records, sample_size=5)
+        
+        # Convert Arrow schema to ColumnInfo for caching
         columns = []
-        sample = records[0]
-        for key, value in sample.items():
-            col_type = self._infer_type(value)
-            columns.append(ColumnInfo(name=key, data_type=col_type, nullable=True))
+        for field in arrow_schema:
+            columns.append(ColumnInfo(
+                name=field.name,
+                data_type=self._arrow_type_to_string(field.type),
+                nullable=True,
+                arrow_type=field.type,
+            ))
         
         self._cache_schema(table, columns)
         return columns
     
-    def _infer_type(self, value: Any) -> str:
-        """Infer type from value."""
-        if value is None:
-            return "string"
-        if isinstance(value, bool):
+    def _arrow_type_to_string(self, arrow_type) -> str:
+        """Convert Arrow type to string representation for legacy compatibility."""
+        import pyarrow as pa
+        if pa.types.is_boolean(arrow_type):
             return "boolean"
-        if isinstance(value, int):
+        if pa.types.is_integer(arrow_type):
             return "integer"
-        if isinstance(value, float):
+        if pa.types.is_floating(arrow_type):
             return "float"
+        if pa.types.is_struct(arrow_type):
+            return "struct"
+        if pa.types.is_list(arrow_type):
+            return "list"
         return "string"
     
     def _to_arrow(
@@ -252,18 +264,38 @@ class RESTAdapter(BaseAdapter):
         schema_columns: List[ColumnInfo],
         selected_columns: List[str] = None,
     ) -> pa.Table:
-        """Convert to Arrow table."""
+        """Convert to Arrow table with native struct support."""
         if not records:
-            return pa.table({c.name: [] for c in schema_columns})
+            fields = []
+            for c in schema_columns:
+                arrow_type = getattr(c, 'arrow_type', None) or pa.string()
+                fields.append(pa.field(c.name, arrow_type))
+            return pa.table({f.name: [] for f in fields})
         
-        columns_data = {}
+        # Use new schema utility for proper struct conversion
+        from waveql.utils.schema import records_to_arrow_table
+        
+        # Build schema from ColumnInfo (which now includes Arrow types)
+        schema_fields = []
         for col in schema_columns:
             if selected_columns and selected_columns != ["*"] and col.name not in selected_columns:
                 continue
-            values = [record.get(col.name) for record in records]
-            columns_data[col.name] = pa.array(values)
+            arrow_type = getattr(col, 'arrow_type', None) or pa.string()
+            schema_fields.append(pa.field(col.name, arrow_type))
         
-        return pa.table(columns_data)
+        schema = pa.schema(schema_fields)
+        
+        # Filter records to only include selected columns if specified
+        if selected_columns and selected_columns != ["*"]:
+            filtered_records = [
+                {k: v for k, v in rec.items() if k in selected_columns}
+                for rec in records
+            ]
+        else:
+            filtered_records = records
+        
+        # Convert using the new utility with struct support
+        return records_to_arrow_table(filtered_records, schema=schema)
     
     def get_schema(self, table: str) -> List[ColumnInfo]:
         """Discover schema."""

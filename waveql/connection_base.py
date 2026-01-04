@@ -33,33 +33,49 @@ class ConnectionMixin:
         Supported formats:
         - file:///path/to/data.csv
         - servicenow://instance.service-now.com
-        - adapter://host?param=value
+        - adapter://user:password@host:port?param=value
         
         Args:
             conn_str: Connection string to parse
             
         Returns:
-            Dict with 'adapter', 'host', and 'params' keys
+            Dict with 'adapter', 'host', 'username', 'password', 'port', and 'params' keys
+            
+        Examples:
+            >>> parse_connection_string("servicenow://admin:secret@dev.service-now.com")
+            {'adapter': 'servicenow', 'host': 'dev.service-now.com', 'username': 'admin', ...}
+            
+            >>> parse_connection_string("jira://company.atlassian.net?expand=names")
+            {'adapter': 'jira', 'host': 'company.atlassian.net', 'params': {'expand': 'names'}, ...}
         """
         # Handle file:// URLs
         if conn_str.startswith("file://"):
             return {
                 "adapter": "file",
                 "host": conn_str[7:],  # Remove file://
+                "username": None,
+                "password": None,
+                "port": None,
                 "params": {}
             }
         
-        # Parse adapter://host format
+        # Parse adapter://[user:pass@]host[:port][?params] format
         parsed = urlparse(conn_str)
         params = {k: v[0] if len(v) == 1 else v for k, v in parse_qs(parsed.query).items()}
         
         result = {
             "adapter": parsed.scheme,
-            "host": parsed.netloc or parsed.path,
+            "host": parsed.hostname or parsed.path,  # hostname excludes credentials
+            "username": parsed.username,              # Extracted from user:pass@host
+            "password": parsed.password,              # Extracted from user:pass@host
+            "port": parsed.port,                      # Extracted from host:port
             "params": params
         }
         
-        logger.debug("Parsed connection string: adapter=%s, host=%s", result["adapter"], result["host"])
+        logger.debug(
+            "Parsed connection string: adapter=%s, host=%s, user=%s",
+            result["adapter"], result["host"], result["username"] or "(none)"
+        )
         return result
     
     @staticmethod

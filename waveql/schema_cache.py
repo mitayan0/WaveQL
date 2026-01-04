@@ -23,6 +23,8 @@ class ColumnInfo:
     nullable: bool = True
     primary_key: bool = False
     description: str = ""
+    arrow_type: Any = None  # Optional PyArrow DataType for struct/list support
+
 
 
 @dataclass

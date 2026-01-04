@@ -418,18 +418,24 @@ class ServiceNowAdapter(BaseAdapter):
             # If no records, we try to discover by fetching one record (async)
             return await self.get_schema_async(table)
         
+        # Use new schema inference utility for robust multi-sample detection
+        from waveql.utils.schema import infer_schema_from_records
+        
+        arrow_schema = infer_schema_from_records(records, sample_size=5)
+        
+        # Convert Arrow schema to ColumnInfo for caching
         columns = []
-        sample = records[0]
-        for key, value in sample.items():
-            col_type = self._infer_type(value)
+        for field in arrow_schema:
             columns.append(ColumnInfo(
-                name=key,
-                data_type=col_type,
+                name=field.name,
+                data_type=self._arrow_type_to_string(field.type),
                 nullable=True,
+                arrow_type=field.type,
             ))
         
         self._cache_schema(table, columns)
         return columns
+
 
     def _get_or_discover_schema(self, table: str, records: List[Dict]) -> List[ColumnInfo]:
         """Get cached schema or discover from response."""
@@ -437,34 +443,43 @@ class ServiceNowAdapter(BaseAdapter):
         if cached:
             return cached
         
-        # Discover from first record
+        # Discover from records using multi-sample inference
         if not records:
             return []
         
+        # Use new schema inference utility for robust multi-sample detection
+        from waveql.utils.schema import infer_schema_from_records
+        
+        arrow_schema = infer_schema_from_records(records, sample_size=5)
+        
+        # Convert Arrow schema to ColumnInfo for caching
         columns = []
-        sample = records[0]
-        for key, value in sample.items():
-            col_type = self._infer_type(value)
+        for field in arrow_schema:
+            # Store the Arrow type directly in data_type for struct support
             columns.append(ColumnInfo(
-                name=key,
-                data_type=col_type,
+                name=field.name,
+                data_type=self._arrow_type_to_string(field.type),
                 nullable=True,
+                # Store the actual Arrow type for _to_arrow
+                arrow_type=field.type,
             ))
         
         # Cache the schema
         self._cache_schema(table, columns)
         return columns
     
-    def _infer_type(self, value: Any) -> str:
-        """Infer data type from value."""
-        if value is None:
-            return "string"
-        if isinstance(value, bool):
+    def _arrow_type_to_string(self, arrow_type: pa.DataType) -> str:
+        """Convert Arrow type to string representation for legacy compatibility."""
+        if pa.types.is_boolean(arrow_type):
             return "boolean"
-        if isinstance(value, int):
+        if pa.types.is_integer(arrow_type):
             return "integer"
-        if isinstance(value, float):
+        if pa.types.is_floating(arrow_type):
             return "float"
+        if pa.types.is_struct(arrow_type):
+            return "struct"
+        if pa.types.is_list(arrow_type):
+            return "list"
         return "string"
     
     def _to_arrow(
@@ -473,32 +488,39 @@ class ServiceNowAdapter(BaseAdapter):
         schema_columns: List[ColumnInfo],
         selected_columns: List[str] = None,
     ) -> pa.Table:
-        """Convert records to Arrow table."""
+        """Convert records to Arrow table with native struct support."""
         if not records:
             # Return empty table with schema
-            fields = [
-                pa.field(c.name, self.TYPE_MAP.get(c.data_type, pa.string()))
-                for c in schema_columns
-            ]
+            fields = []
+            for c in schema_columns:
+                arrow_type = getattr(c, 'arrow_type', None) or self.TYPE_MAP.get(c.data_type, pa.string())
+                fields.append(pa.field(c.name, arrow_type))
             return pa.table({f.name: [] for f in fields})
         
-        # Build columns dict
-        columns_data = {}
+        # Use new schema utility for proper struct conversion
+        from waveql.utils.schema import records_to_arrow_table, infer_schema_from_records
+        
+        # Build schema from ColumnInfo (which now includes Arrow types)
+        schema_fields = []
         for col in schema_columns:
             if selected_columns and selected_columns != ["*"] and col.name not in selected_columns:
                 continue
-            
-            values = [record.get(col.name) for record in records]
-            arrow_type = self.TYPE_MAP.get(col.data_type, pa.string())
-            
-            # Convert to Arrow array
-            try:
-                columns_data[col.name] = pa.array(values, type=arrow_type)
-            except (pa.ArrowInvalid, pa.ArrowTypeError):
-                # Fall back to string
-                columns_data[col.name] = pa.array([str(v) if v is not None else None for v in values])
+            arrow_type = getattr(col, 'arrow_type', None) or self.TYPE_MAP.get(col.data_type, pa.string())
+            schema_fields.append(pa.field(col.name, arrow_type))
         
-        return pa.table(columns_data)
+        schema = pa.schema(schema_fields)
+        
+        # Filter records to only include selected columns if specified
+        if selected_columns and selected_columns != ["*"]:
+            filtered_records = [
+                {k: v for k, v in rec.items() if k in selected_columns}
+                for rec in records
+            ]
+        else:
+            filtered_records = records
+        
+        # Convert using the new utility with struct support
+        return records_to_arrow_table(filtered_records, schema=schema)
     
     async def get_schema_async(self, table: str) -> List[ColumnInfo]:
         """Discover schema by fetching one record (async)."""

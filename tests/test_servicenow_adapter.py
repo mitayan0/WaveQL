@@ -472,28 +472,34 @@ class TestArrowConversion:
 
     def test_type_inference_integer(self):
         """Test integer type inference."""
-        adapter = ServiceNowAdapter(host="test.service-now.com")
-        assert adapter._infer_type(42) == "integer"
+        from waveql.utils.schema import infer_arrow_type
+        import pyarrow as pa
+        assert infer_arrow_type(42) == pa.int64()
 
     def test_type_inference_float(self):
         """Test float type inference."""
-        adapter = ServiceNowAdapter(host="test.service-now.com")
-        assert adapter._infer_type(3.14) == "float"
+        from waveql.utils.schema import infer_arrow_type
+        import pyarrow as pa
+        assert infer_arrow_type(3.14) == pa.float64()
 
     def test_type_inference_boolean(self):
         """Test boolean type inference."""
-        adapter = ServiceNowAdapter(host="test.service-now.com")
-        assert adapter._infer_type(True) == "boolean"
+        from waveql.utils.schema import infer_arrow_type
+        import pyarrow as pa
+        assert infer_arrow_type(True) == pa.bool_()
 
     def test_type_inference_string(self):
         """Test string type inference."""
-        adapter = ServiceNowAdapter(host="test.service-now.com")
-        assert adapter._infer_type("hello") == "string"
+        from waveql.utils.schema import infer_arrow_type
+        import pyarrow as pa
+        assert infer_arrow_type("hello") == pa.string()
 
     def test_type_inference_none(self):
-        """Test None value defaults to string."""
-        adapter = ServiceNowAdapter(host="test.service-now.com")
-        assert adapter._infer_type(None) == "string"
+        """Test None value defaults to null (not string - null gets promoted later)."""
+        from waveql.utils.schema import infer_arrow_type
+        import pyarrow as pa
+        assert infer_arrow_type(None) == pa.null()
+
 
 
 if __name__ == "__main__":
