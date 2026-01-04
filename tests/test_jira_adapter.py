@@ -61,7 +61,8 @@ class TestJiraAdapter:
         records = result.to_pylist()
         assert records[0]["key"] == "PROJ-1"
         assert records[0]["summary"] == "Test Issue"
-        assert records[0]["status"] == "Open"
+        # With struct support, nested objects are preserved as dicts
+        assert records[0]["status"]["name"] == "Open"  # Access via struct
         assert records[1]["key"] == "PROJ-2"
         assert records[1]["assignee"] is None
     
@@ -379,15 +380,15 @@ class TestJQLConversion:
         assert "In Progress" in jql
 
 
-class TestIssueFlattening:
-    """Tests for issue flattening logic."""
+class TestIssueNormalization:
+    """Tests for issue normalization logic (preserves nested structures)."""
     
     @pytest.fixture
     def adapter(self):
         return JiraAdapter(host="https://test.atlassian.net")
     
-    def test_flatten_basic_fields(self, adapter):
-        """Test flattening basic issue fields."""
+    def test_normalize_basic_fields(self, adapter):
+        """Test normalizing basic issue fields."""
         issue = {
             "id": "10001",
             "key": "PROJ-1",
@@ -397,14 +398,14 @@ class TestIssueFlattening:
             }
         }
         
-        flat = adapter._flatten_issue(issue)
+        normalized = adapter._normalize_issue(issue)
         
-        assert flat["id"] == "10001"
-        assert flat["key"] == "PROJ-1"
-        assert flat["summary"] == "Test summary"
+        assert normalized["id"] == "10001"
+        assert normalized["key"] == "PROJ-1"
+        assert normalized["summary"] == "Test summary"
     
-    def test_flatten_nested_objects(self, adapter):
-        """Test flattening nested objects."""
+    def test_normalize_preserves_nested_objects(self, adapter):
+        """Test that nested objects are preserved as dicts (for struct columns)."""
         issue = {
             "id": "10001",
             "key": "PROJ-1",
@@ -416,15 +417,16 @@ class TestIssueFlattening:
             }
         }
         
-        flat = adapter._flatten_issue(issue)
+        normalized = adapter._normalize_issue(issue)
         
-        assert flat["status"] == "Open"
-        assert flat["priority"] == "High"
-        assert flat["assignee"] == "John Doe"
-        assert flat["project"] == "PROJ"
+        # Nested objects should be preserved, not flattened
+        assert normalized["status"] == {"name": "Open"}
+        assert normalized["priority"] == {"name": "High"}
+        assert normalized["assignee"] == {"displayName": "John Doe"}
+        assert normalized["project"] == {"key": "PROJ"}
     
-    def test_flatten_null_values(self, adapter):
-        """Test flattening null values."""
+    def test_normalize_null_values(self, adapter):
+        """Test normalizing null values."""
         issue = {
             "id": "10001",
             "key": "PROJ-1",
@@ -434,13 +436,13 @@ class TestIssueFlattening:
             }
         }
         
-        flat = adapter._flatten_issue(issue)
+        normalized = adapter._normalize_issue(issue)
         
-        assert flat["assignee"] is None
-        assert flat["duedate"] is None
+        assert normalized["assignee"] is None
+        assert normalized["duedate"] is None
     
-    def test_flatten_array_fields(self, adapter):
-        """Test flattening array fields."""
+    def test_normalize_preserves_arrays(self, adapter):
+        """Test that arrays are preserved as lists (for list columns)."""
         issue = {
             "id": "10001",
             "key": "PROJ-1",
@@ -450,11 +452,11 @@ class TestIssueFlattening:
             }
         }
         
-        flat = adapter._flatten_issue(issue)
+        normalized = adapter._normalize_issue(issue)
         
-        # Components with name should be joined
-        assert "Backend" in flat["components"]
-        assert "API" in flat["components"]
+        # Arrays should be preserved as-is
+        assert normalized["labels"] == ["bug", "critical"]
+        assert normalized["components"] == [{"name": "Backend"}, {"name": "API"}]
 
 
 if __name__ == "__main__":

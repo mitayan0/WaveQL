@@ -408,18 +408,37 @@ class SalesforceAdapter(BaseAdapter):
             raise e
 
     def _to_arrow(self, records: List[Dict], schema: List[ColumnInfo], selected_columns: List[str] = None) -> pa.Table:
-        """Convert records to Arrow."""
+        """Convert records to Arrow table with native struct support."""
         if not records:
             return pa.table({c.name: [] for c in schema})
 
-        data_arrays = {}
+        # Use new schema utility for proper struct conversion
+        from waveql.utils.schema import records_to_arrow_table, infer_schema_from_records
+        
+        # Build Arrow schema from ColumnInfo
+        schema_fields = []
         for col in schema:
             if selected_columns and selected_columns != ["*"] and col.name not in selected_columns:
                 continue
-                
-            # Extract values, handling nested lookups if we supported them (SOQL relationship queries)
-            # For now simple fields
-            values = [r.get(col.name) for r in records]
-            data_arrays[col.name] = pa.array(values)
-            
-        return pa.table(data_arrays)
+            arrow_type = getattr(col, 'arrow_type', None) or pa.string()
+            schema_fields.append(pa.field(col.name, arrow_type))
+        
+        # If we have arrow_types, use predefined schema; otherwise infer from records
+        if schema_fields and any(getattr(c, 'arrow_type', None) for c in schema):
+            arrow_schema = pa.schema(schema_fields)
+        else:
+            # Infer schema from records for proper struct support
+            arrow_schema = infer_schema_from_records(records, sample_size=5)
+        
+        # Filter records to only include selected columns if specified
+        if selected_columns and selected_columns != ["*"]:
+            filtered_records = [
+                {k: v for k, v in rec.items() if k in selected_columns}
+                for rec in records
+            ]
+        else:
+            filtered_records = records
+        
+        # Convert using the new utility with struct support
+        return records_to_arrow_table(filtered_records, schema=arrow_schema)
+

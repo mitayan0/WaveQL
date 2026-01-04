@@ -48,6 +48,9 @@ class WaveQLConnection(ConnectionMixin):
             parsed = self.parse_connection_string(connection_string)
             adapter = adapter or parsed.get("adapter")
             host = host or parsed.get("host")
+            # Use URL-embedded credentials if not explicitly provided
+            username = username or parsed.get("username")
+            password = password or parsed.get("password")
             # Merge parsed kwargs
             kwargs = {**parsed.get("params", {}), **kwargs}
         

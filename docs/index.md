@@ -4,7 +4,19 @@ Welcome to the official documentation for **WaveQL**, the universal SQL connecto
 
 WaveQL allows data engineers, developers, and data scientists to query SaaS platforms (ServiceNow, Salesforce, Jira) and generic REST APIs using standard ANSI SQL. By abstracting the complexities of API pagination, authentication, and filter syntax, WaveQL provides a unified data access layer for your organization.
 
-## Content Overview
+## Getting Started
+
+### [⚡ Quick Start Guide](quickstart.md) ← Start Here!
+Complete guide to connecting and querying all supported data sources.
+*   [Connection Methods](quickstart.md#connection-methods) - Connection strings & parameters
+*   [ServiceNow](quickstart.md#servicenow) - Setup, auth, and query examples
+*   [Jira](quickstart.md#jira) - API tokens and JQL translation
+*   [Salesforce](quickstart.md#salesforce) - OAuth and SOQL
+*   [REST API](quickstart.md#rest-api-generic) - Generic JSON APIs
+*   [Files](quickstart.md#files-csv-parquet-excel) - CSV, Parquet, Excel
+*   [Cross-Source Joins](quickstart.md#cross-source-joins) - Join anything!
+
+## Core Concepts
 
 ### [Architecture & Design](architecture.md)
 Understand how WaveQL translates SQL into API calls, handles connection pooling, and leverages Apache Arrow for high-performance data transport.
@@ -12,7 +24,7 @@ Understand how WaveQL translates SQL into API calls, handles connection pooling,
 *   [Predicate Pushdown Engine](architecture.md#predicate-pushdown-engine)
 *   [Virtual Joins (DuckDB)](architecture.md#virtual-joins)
 
-### [Adapter Guide](adapters.md)
+### [Adapter Reference](adapters.md)
 Detailed documentation on built-in adapters and instructions for building custom connectors.
 *   [ServiceNow](adapters.md#servicenow)
 *   [Salesforce](adapters.md#salesforce)
@@ -25,23 +37,41 @@ Securely managing credentials and authentication flows.
 *   [OAuth2 Flows](auth.md#oauth2)
 *   [API Key & Basic Auth](auth.md#basic-auth)
 
-### [Performance Tuning](performance.md)
-Best practices for optimizing query performance and minimizing API usage.
-*   [Pagination Strategies](performance.md#pagination)
-*   [Memory Management](performance.md#memory)
-*   [Async Concurrency](performance.md#concurrency)
+## Advanced Features
 
-### [Tutorial](tutorial.md)
-Step-by-step guide to getting started with WaveQL, handling queries, and using advanced features like CDC.
-
-### [API Reference](api.md)
-Comprehensive class and function reference for the WaveQL SDK.
+### [Schema Inference & Nested JSON](schema-inference.md)
+Automatic schema discovery with native support for nested JSON structures.
+*   [Multi-Sample Schema Inference](schema-inference.md#multi-sample-schema-inference)
+*   [Native Struct Columns](schema-inference.md#how-it-works)
+*   [Schema Evolution Detection](schema-inference.md#schema-evolution)
+*   [Dot-Notation Queries](schema-inference.md#usage-examples)
 
 ### [Change Data Capture (CDC)](cdc.md)
 Real-time streaming of data changes from your sources.
 *   [Streaming Concepts](cdc.md#concepts)
 *   [Configuration](cdc.md#configuration)
 *   [Async Integration](cdc.md#async)
+
+### [Performance Tuning](performance.md)
+Best practices for optimizing query performance and minimizing API usage.
+*   [Pagination Strategies](performance.md#pagination)
+*   [Memory Management](performance.md#memory)
+*   [Async Concurrency](performance.md#concurrency)
+
+### [Error Handling](error-handling.md)
+Rich, developer-friendly error messages with actionable suggestions.
+*   [Error Codes Reference](error-handling.md#error-codes-reference)
+*   [Rate Limit Handling](error-handling.md#rate-limit-handling)
+*   [Schema Evolution Errors](error-handling.md#schema-evolution-errors)
+
+## Reference
+
+### [API Reference](api.md)
+Comprehensive class and function reference for the WaveQL SDK.
+
+### [Tutorial](tutorial.md)
+Step-by-step guide with examples for common use cases.
+
 
 ---
 

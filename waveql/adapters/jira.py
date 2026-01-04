@@ -277,7 +277,7 @@ class JiraAdapter(BaseAdapter):
                     break
         
         # Flatten and convert to Arrow
-        records = [self._flatten_issue(issue) for issue in all_issues]
+        records = [self._normalize_issue(issue) for issue in all_issues]
         if limit:
             records = records[:limit]
         
@@ -342,7 +342,7 @@ class JiraAdapter(BaseAdapter):
             if len(issues) < self._page_size:
                 break
         
-        records = [self._flatten_issue(issue) for issue in all_issues]
+        records = [self._normalize_issue(issue) for issue in all_issues]
         if limit:
             records = records[:limit]
         
@@ -489,45 +489,31 @@ class JiraAdapter(BaseAdapter):
         else:
             return f"{col} {jql_op} {val}"
     
-    def _flatten_issue(self, issue: Dict) -> Dict:
-        """Flatten a Jira issue into a flat record."""
+    def _normalize_issue(self, issue: Dict) -> Dict:
+        """
+        Normalize a Jira issue for Arrow conversion.
+        
+        Unlike the old _flatten_issue, this preserves nested objects as dicts
+        so they become queryable structs in DuckDB:
+        
+            SELECT fields.reporter.displayName FROM jira.issues
+        """
         record = {
             "id": issue.get("id"),
             "key": issue.get("key"),
             "self": issue.get("self"),
         }
         
+        # Merge fields directly into record, preserving nested structures
         fields = issue.get("fields", {})
-        
-        # Core fields
         for field_name, value in fields.items():
-            if value is None:
-                record[field_name] = None
-            elif isinstance(value, dict):
-                # Handle nested objects
-                if "name" in value:
-                    record[field_name] = value["name"]
-                elif "displayName" in value:
-                    record[field_name] = value["displayName"]
-                elif "value" in value:
-                    record[field_name] = value["value"]
-                elif "key" in value:
-                    record[field_name] = value["key"]
-                else:
-                    record[field_name] = json.dumps(value)
-            elif isinstance(value, list):
-                # Handle arrays
-                if all(isinstance(v, dict) and "name" in v for v in value):
-                    record[field_name] = ", ".join(v["name"] for v in value)
-                else:
-                    record[field_name] = json.dumps(value)
-            else:
-                record[field_name] = value
+            # Keep nested dicts and lists as-is for struct/list type inference
+            record[field_name] = value
         
         return record
     
     def _get_or_discover_schema(self, table: str, records: List[Dict]) -> List[ColumnInfo]:
-        """Discover schema from records."""
+        """Discover schema from records using multi-sample inference with struct support."""
         cached = self._get_cached_schema(table)
         if cached:
             return cached
@@ -535,25 +521,36 @@ class JiraAdapter(BaseAdapter):
         if not records:
             return []
         
+        # Use new schema inference utility for robust multi-sample detection
+        from waveql.utils.schema import infer_schema_from_records
+        
+        arrow_schema = infer_schema_from_records(records, sample_size=5)
+        
+        # Convert Arrow schema to ColumnInfo for caching
         columns = []
-        sample = records[0]
-        for key, value in sample.items():
-            col_type = self._infer_type(value)
-            columns.append(ColumnInfo(name=key, data_type=col_type, nullable=True))
+        for field in arrow_schema:
+            columns.append(ColumnInfo(
+                name=field.name,
+                data_type=self._arrow_type_to_string(field.type),
+                nullable=True,
+                arrow_type=field.type,
+            ))
         
         self._cache_schema(table, columns)
         return columns
     
-    def _infer_type(self, value: Any) -> str:
-        """Infer data type from value."""
-        if value is None:
-            return "string"
-        if isinstance(value, bool):
+    def _arrow_type_to_string(self, arrow_type: pa.DataType) -> str:
+        """Convert Arrow type to string representation for legacy compatibility."""
+        if pa.types.is_boolean(arrow_type):
             return "boolean"
-        if isinstance(value, int):
+        if pa.types.is_integer(arrow_type):
             return "integer"
-        if isinstance(value, float):
+        if pa.types.is_floating(arrow_type):
             return "number"
+        if pa.types.is_struct(arrow_type):
+            return "struct"
+        if pa.types.is_list(arrow_type):
+            return "array"
         return "string"
     
     def _to_arrow(
@@ -562,24 +559,38 @@ class JiraAdapter(BaseAdapter):
         schema_columns: List[ColumnInfo],
         selected_columns: List[str] = None,
     ) -> pa.Table:
-        """Convert records to Arrow table."""
+        """Convert records to Arrow table with native struct support."""
         if not records:
-            return pa.table({c.name: [] for c in schema_columns})
+            fields = []
+            for c in schema_columns:
+                arrow_type = getattr(c, 'arrow_type', None) or self.TYPE_MAP.get(c.data_type, pa.string())
+                fields.append(pa.field(c.name, arrow_type))
+            return pa.table({f.name: [] for f in fields})
         
-        columns_data = {}
+        # Use new schema utility for proper struct conversion
+        from waveql.utils.schema import records_to_arrow_table
+        
+        # Build schema from ColumnInfo (which now includes Arrow types)
+        schema_fields = []
         for col in schema_columns:
             if selected_columns and selected_columns != ["*"] and col.name not in selected_columns:
                 continue
-            
-            values = [record.get(col.name) for record in records]
-            arrow_type = self.TYPE_MAP.get(col.data_type, pa.string())
-            
-            try:
-                columns_data[col.name] = pa.array(values, type=arrow_type)
-            except (pa.ArrowInvalid, pa.ArrowTypeError):
-                columns_data[col.name] = pa.array([str(v) if v is not None else None for v in values])
+            arrow_type = getattr(col, 'arrow_type', None) or self.TYPE_MAP.get(col.data_type, pa.string())
+            schema_fields.append(pa.field(col.name, arrow_type))
         
-        return pa.table(columns_data)
+        schema = pa.schema(schema_fields)
+        
+        # Filter records to only include selected columns if specified
+        if selected_columns and selected_columns != ["*"]:
+            filtered_records = [
+                {k: v for k, v in rec.items() if k in selected_columns}
+                for rec in records
+            ]
+        else:
+            filtered_records = records
+        
+        # Convert using the new utility with struct support
+        return records_to_arrow_table(filtered_records, schema=schema)
     
     def get_schema(self, table: str) -> List[ColumnInfo]:
         """Discover schema by fetching one record."""
