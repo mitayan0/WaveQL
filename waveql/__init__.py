@@ -26,6 +26,14 @@ from waveql.exceptions import (
     PredicatePushdownError,
     ConfigurationError,
     TimeoutError,
+    ContractViolationError,
+)
+from waveql.contracts import (
+    DataContract,
+    ColumnContract,
+    ContractValidator,
+    ContractRegistry,
+    ContractValidationResult,
 )
 from waveql.adapters import BaseAdapter, register_adapter, get_adapter
 from waveql.auth import (
@@ -45,7 +53,7 @@ from waveql.optimizer import (
     SubqueryPushdownOptimizer,
 )
 
-__version__ = "0.1.5"
+__version__ = "0.1.6"
 __all__ = [
     "connect",
     "WaveQLConnection",
@@ -82,6 +90,13 @@ __all__ = [
     "PredicateType",
     "SubqueryInfo",
     "SubqueryPushdownOptimizer",
+    # Contracts
+    "DataContract",
+    "ColumnContract",
+    "ContractValidator",
+    "ContractRegistry",
+    "ContractValidationResult",
+    "ContractViolationError",
     # Async support
     "connect_async",
     "AsyncWaveQLConnection",

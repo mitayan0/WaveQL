@@ -1,7 +1,7 @@
 # WaveQL Project Roadmap
 
-> **Last Updated:** 2026-01-05  
-> **Current Version:** 0.1.5
+> **Last Updated:** 2026-01-06  
+> **Current Version:** 0.1.6
 
 ---
 
@@ -103,17 +103,27 @@
 
 ---
 
-## 📋 Planned Features
+## ✅ Completed in v0.1.6
 
-### v0.1.6 - Data Contracts & Validation
-- [ ] **Data Contracts**: Pydantic-based schema validation
-  - [ ] `DataContract` model for table schemas
-  - [ ] Runtime validation of API responses
-  - [ ] JSON Schema export for documentation
-- [ ] **Schema Change Detection**: Alert on API schema changes
-  - [ ] Compare cached vs live schema
-  - [ ] Emit warnings for breaking changes
-  - [ ] Optional strict mode (fail on schema mismatch)
+### Data Contracts & Validation ✅ NEW
+- [x] **Data Contracts**: Pydantic-based schema validation
+  - [x] `DataContract` model for table schemas
+  - [x] `ColumnContract` model for column definitions
+  - [x] Runtime validation of API responses
+  - [x] JSON Schema export for documentation
+  - [x] YAML/JSON file-based contract loading
+- [x] **Schema Change Detection**: Alert on API schema changes
+  - [x] Compare contract vs live schema
+  - [x] Emit warnings for breaking changes
+  - [x] Configurable strict modes (columns and types)
+- [x] **Contract Registry**: Centralized contract management
+  - [x] File-based loading from directories
+  - [x] Schema drift detection
+  - [x] Contract generation from Arrow schemas
+
+---
+
+## 📋 Planned Features
 
 ### v0.1.7 - Streaming & Scalability
 - [ ] Generator-based streaming for large result sets (RecordBatch yielding)

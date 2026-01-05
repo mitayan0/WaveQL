@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-01-06
+
+### Added
+
+- **Data Contracts** (Pydantic-based Schema Validation)
+  - New `DataContract` model for defining table schemas with type safety
+  - New `ColumnContract` model for column-level definitions
+  - Support for all common types: string, integer, float, boolean, datetime, timestamp, etc.
+  - Nested structure support: `struct` and `list` column types
+  - Column aliases for schema evolution handling
+  - JSON Schema export for documentation generation
+  - YAML/JSON file-based contract definitions
+
+- **Contract Validation**
+  - New `ContractValidator` class for runtime validation of Arrow tables
+  - Violation types: `MISSING_COLUMN`, `EXTRA_COLUMN`, `TYPE_MISMATCH`, `NULL_VIOLATION`
+  - Configurable strict modes for columns and types
+  - Detailed violation reporting with `ContractValidationResult`
+
+- **Contract Registry**
+  - Centralized contract management with `ContractRegistry`
+  - File-based loading from JSON/YAML directories
+  - Schema drift detection between contracts and live schemas
+  - Contract generation from existing Arrow schemas
+
+- **New Exception**: `ContractViolationError` (E011) for validation failures
+
+### Documentation
+
+- New documentation: `docs/contracts.md` - Complete guide to Data Contracts
+- New example: `examples/contracts_demo.py` - Interactive demo of all contract features
+- Updated `docs/index.md` with Data Contracts section
+
+### Tests
+
+- Added comprehensive test suite (`test_contracts.py`)
+  - 35+ tests covering models, validation, registry, and integration
+
 ## [0.1.5] - 2026-01-05
 
 ### Added
@@ -140,9 +178,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 0.1.6 | 2026-01-06 | Data Contracts & Validation (Pydantic-based) |
+| 0.1.5 | 2026-01-05 | Complex predicates, subquery pushdown, Pandas/SQLAlchemy guide |
 | 0.1.1 | 2026-01-03 | Quoted identifier support, bug fixes |
 | 0.1.0 | 2026-01-03 | Initial release |
 
-[Unreleased]: https://github.com/mitayan0/WaveQL/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/mitayan0/WaveQL/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/mitayan0/WaveQL/compare/v0.1.5...v0.1.6
+[0.1.5]: https://github.com/mitayan0/WaveQL/compare/v0.1.1...v0.1.5
 [0.1.1]: https://github.com/mitayan0/WaveQL/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/mitayan0/WaveQL/releases/tag/v0.1.0

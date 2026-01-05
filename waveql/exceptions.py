@@ -280,6 +280,41 @@ class SchemaEvolutionError(WaveQLError):
         super().__init__(message, suggestion=suggestion, context=context, **kwargs)
 
 
+class ContractViolationError(WaveQLError):
+    """
+    Data contract validation failed.
+    
+    Raised when API response data doesn't match the defined contract schema.
+    Includes details about which columns/types violated the contract.
+    """
+    
+    error_code = "E011"
+    
+    def __init__(
+        self,
+        message: str,
+        violations: list = None,
+        table: str = None,
+        adapter: str = None,
+        **kwargs
+    ):
+        self.violations = violations or []
+        
+        suggestion = kwargs.pop('suggestion', None) or (
+            "Review the data contract and update it to match the API response, "
+            "or fix the data source to match the expected schema."
+        )
+        context = kwargs.pop('context', {})
+        if table:
+            context['table'] = table
+        if adapter:
+            context['adapter'] = adapter
+        if violations:
+            context['violation_count'] = len(violations)
+        
+        super().__init__(message, suggestion=suggestion, context=context, **kwargs)
+
+
 # Export all exceptions
 __all__ = [
     "WaveQLError",
@@ -293,4 +328,5 @@ __all__ = [
     "ConfigurationError",
     "TimeoutError",
     "SchemaEvolutionError",
+    "ContractViolationError",
 ]
