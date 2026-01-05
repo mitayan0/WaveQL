@@ -76,3 +76,74 @@ async with waveql.connect_async(...) as conn:
     task2 = conn.execute("SELECT ...")
     await asyncio.gather(task1, task2)
 ```
+
+## 7. Query Result Caching
+
+WaveQL includes a built-in query cache that dramatically improves performance for repeated queries.
+
+### Default Caching
+
+Caching is enabled by default with a 5-minute TTL:
+
+```python
+conn = waveql.connect("servicenow://...")
+
+# First query: ~500ms (API call)
+cursor.execute("SELECT * FROM incident WHERE active=true")
+
+# Second query: ~1ms (from cache!)
+cursor.execute("SELECT * FROM incident WHERE active=true")
+```
+
+### Configure TTL
+
+```python
+# 1 minute cache for frequently changing data
+conn = waveql.connect("servicenow://...", cache_ttl=60)
+
+# Disable caching for real-time data
+conn = waveql.connect("servicenow://...", enable_cache=False)
+```
+
+### Per-Adapter TTL
+
+Different data sources have different freshness requirements:
+
+```python
+from waveql import CacheConfig
+
+config = CacheConfig(
+    default_ttl=300,
+    adapter_ttl={
+        "servicenow": 60,   # Fast-changing tickets: 1 min
+        "cmdb": 3600,       # Slow-changing CMDB: 1 hour
+    }
+)
+conn = waveql.connect("servicenow://...", cache_config=config)
+```
+
+### Monitor Cache Performance
+
+```python
+stats = conn.cache_stats
+print(f"Hit rate: {stats.hit_rate:.1f}%")
+print(f"Size: {stats.size_mb:.1f}MB")
+print(f"Entries: {stats.entries}")
+```
+
+### Cache Invalidation
+
+```python
+# Clear all cache
+conn.invalidate_cache()
+
+# Clear specific table
+conn.invalidate_cache(table="incident")
+
+# Automatically invalidated on INSERT/UPDATE/DELETE
+cursor.execute("UPDATE incident SET priority=1 WHERE number='INC001'")
+# Cache for 'incident' table is automatically cleared
+```
+
+See the [Caching Documentation](caching.md) for complete details.
+

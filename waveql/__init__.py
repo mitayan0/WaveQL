@@ -36,8 +36,9 @@ from waveql.auth import (
     JWTAuthManager,
     create_auth_manager,
 )
+from waveql.cache import QueryCache, CacheConfig, CacheStats
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 __all__ = [
     "connect",
     "WaveQLConnection",
@@ -64,6 +65,10 @@ __all__ = [
     "APIKeyAuthManager",
     "JWTAuthManager",
     "create_auth_manager",
+    # Caching
+    "QueryCache",
+    "CacheConfig",
+    "CacheStats",
     # Async support
     "connect_async",
     "AsyncWaveQLConnection",
@@ -89,6 +94,10 @@ def connect(
     password: str = None,
     api_key: str = None,
     oauth_token: str = None,
+    # Cache configuration
+    cache_ttl: float = None,
+    cache_config: CacheConfig = None,
+    enable_cache: bool = True,
     **kwargs
 ) -> WaveQLConnection:
     """
@@ -102,23 +111,32 @@ def connect(
         password: Password for Basic Auth
         api_key: API key for API Key auth
         oauth_token: OAuth2 access token
+        cache_ttl: Cache TTL in seconds (default: 300). Set to 0 to disable caching.
+        cache_config: Full CacheConfig object for advanced configuration
+        enable_cache: Whether to enable query caching (default: True)
         **kwargs: Additional adapter-specific options
         
     Returns:
         WaveQLConnection instance
         
     Examples:
-        # Using connection string
+        # Using connection string with default caching (5 min TTL)
         conn = waveql.connect("servicenow://myinstance.service-now.com",
                               username="admin", password="secret")
         
-        # Using explicit parameters
-        conn = waveql.connect(adapter="servicenow", 
-                              host="myinstance.service-now.com",
-                              username="admin", password="secret")
+        # Disable caching
+        conn = waveql.connect("servicenow://...", enable_cache=False)
         
-        # CSV/Parquet files
-        conn = waveql.connect("file:///path/to/data.csv")
+        # Custom cache TTL (1 minute)
+        conn = waveql.connect("servicenow://...", cache_ttl=60)
+        
+        # Advanced cache configuration
+        conn = waveql.connect("servicenow://...",
+                              cache_config=CacheConfig(
+                                  default_ttl=300,
+                                  max_memory_mb=256,
+                                  adapter_ttl={"servicenow": 60}
+                              ))
     """
     return WaveQLConnection(
         connection_string=connection_string,
@@ -128,6 +146,9 @@ def connect(
         password=password,
         api_key=api_key,
         oauth_token=oauth_token,
+        cache_ttl=cache_ttl,
+        cache_config=cache_config,
+        enable_cache=enable_cache,
         **kwargs
     )
 
@@ -141,10 +162,16 @@ async def connect_async(
     password: str = None,
     api_key: str = None,
     oauth_token: str = None,
+    # Cache configuration
+    cache_ttl: float = None,
+    cache_config: CacheConfig = None,
+    enable_cache: bool = True,
     **kwargs
 ) -> "AsyncWaveQLConnection":
     """
     Create a new asynchronous WaveQL connection.
+    
+    Same parameters as connect(), with full async/await support.
     """
     from waveql.async_connection import AsyncWaveQLConnection
     
@@ -156,5 +183,8 @@ async def connect_async(
         password=password,
         api_key=api_key,
         oauth_token=oauth_token,
+        cache_ttl=cache_ttl,
+        cache_config=cache_config,
+        enable_cache=enable_cache,
         **kwargs
     )

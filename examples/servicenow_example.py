@@ -21,11 +21,12 @@ def main():
     print("WaveQL - ServiceNow Example")
     print("=" * 50)
     
-    # Connect to ServiceNow
+    # Connect to ServiceNow with caching (60 second TTL)
     conn = connect(
         f"servicenow://{INSTANCE}",
         username=USERNAME,
         password=PASSWORD,
+        cache_ttl=60,  # Cache results for 60 seconds
     )
     cursor = conn.cursor()
     
@@ -62,9 +63,28 @@ def main():
     df = cursor.to_df()
     print(df)
     
+    # Example 4: Demonstrate caching
+    print("\n4. Cache Statistics:")
+    print("-" * 40)
+    # Repeat a query - will be served from cache
+    cursor.execute("""
+        SELECT number, short_description, priority, state
+        FROM incident
+        WHERE state = 1
+        ORDER BY sys_created_on DESC
+        LIMIT 10
+    """)
+    
+    stats = conn.cache_stats
+    print(f"  Cache hits: {stats.hits}")
+    print(f"  Cache misses: {stats.misses}")
+    print(f"  Hit rate: {stats.hit_rate:.1f}%")
+    print(f"  Cached entries: {stats.entries}")
+    
     conn.close()
     print("\nDone!")
 
 
 if __name__ == "__main__":
     main()
+

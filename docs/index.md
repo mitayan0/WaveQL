@@ -54,9 +54,18 @@ Real-time streaming of data changes from your sources.
 
 ### [Performance Tuning](performance.md)
 Best practices for optimizing query performance and minimizing API usage.
-*   [Pagination Strategies](performance.md#pagination)
-*   [Memory Management](performance.md#memory)
-*   [Async Concurrency](performance.md#concurrency)
+*   [Predicate Pushdown](performance.md#1-predicate-pushdown-the-1-rule)
+*   [Pagination Strategies](performance.md#3-pagination--batch-sizes)
+*   [Parallel Fetching](performance.md#4-parallel-fetching-servicenow)
+*   [Query Caching](performance.md#7-query-result-caching)
+*   [Async Concurrency](performance.md#6-async-for-concurrency)
+
+### [Query Result Caching](caching.md)
+Built-in LRU cache with TTL support for reducing API calls and improving response times.
+*   [Configuration](caching.md#configuration-options) - TTL, memory limits, per-adapter settings
+*   [Statistics](caching.md#cache-statistics) - Monitor hit rate and memory usage
+*   [Invalidation](caching.md#cache-invalidation) - Manual and automatic cache clearing
+*   [Best Practices](caching.md#best-practices) - Matching TTL to data volatility
 
 ### [Error Handling](error-handling.md)
 Rich, developer-friendly error messages with actionable suggestions.

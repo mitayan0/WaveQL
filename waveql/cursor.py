@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
 import re
 import uuid
+import logging
 import pyarrow as pa
 
 from waveql.exceptions import QueryError
@@ -14,6 +15,8 @@ from waveql.observability import QueryPlan
 
 if TYPE_CHECKING:
     from waveql.connection import WaveQLConnection
+
+logger = logging.getLogger(__name__)
 
 
 class WaveQLCursor:
@@ -178,19 +181,62 @@ class WaveQLCursor:
         return self._connection.get_adapter("default")
     
     def _execute_via_adapter(self, query_info, adapter, parameters) -> pa.Table:
-        """Execute query via adapter with predicate pushdown."""
+        """Execute query via adapter with predicate pushdown and caching."""
         # Clean the table name to remove schema prefix and quotes for the adapter
         clean_table = self._clean_table_name(query_info.table)
         
         # Let adapter fetch data with pushed-down predicates
         if query_info.operation == "SELECT":
+            # Check cache first
+            cache = self._connection._cache
+            cache_key = None
+            
+            if cache.config.enabled and cache.config.should_cache_table(query_info.table):
+                # Generate cache key from query components
+                cache_key = cache.generate_key(
+                    adapter_name=adapter.adapter_name,
+                    table=clean_table,
+                    columns=tuple(query_info.columns) if query_info.columns else ("*",),
+                    predicates=tuple(
+                        (p.column, p.operator, p.value) for p in query_info.predicates
+                    ) if query_info.predicates else (),
+                    limit=query_info.limit,
+                    offset=query_info.offset,
+                    order_by=tuple(query_info.order_by) if query_info.order_by else None,
+                    group_by=tuple(query_info.group_by) if query_info.group_by else None,
+                )
+                
+                # Try to get from cache
+                cached_result = cache.get(cache_key)
+                if cached_result is not None:
+                    # Cache hit - add to execution plan and return
+                    step = self.last_plan.add_step(
+                        name=f"Cache hit for {clean_table}",
+                        type="cache",
+                        details={
+                            "table": clean_table,
+                            "adapter": adapter.adapter_name,
+                            "cache_key": cache_key,
+                            "rows": len(cached_result),
+                        }
+                    )
+                    step.finish()
+                    self._rowcount = len(cached_result)
+                    logger.debug(
+                        "Cache hit: adapter=%s, table=%s, rows=%d",
+                        adapter.adapter_name, clean_table, len(cached_result)
+                    )
+                    return cached_result
+            
+            # Cache miss or caching disabled - fetch from adapter
             step = self.last_plan.add_step(
                 name=f"Fetch from {adapter.adapter_name}",
                 type="fetch",
                 details={
                     "table": clean_table,
                     "adapter": adapter.adapter_name,
-                    "pushdown_predicates": [str(p) for p in query_info.predicates]
+                    "pushdown_predicates": [str(p) for p in query_info.predicates],
+                    "cache_miss": cache_key is not None,
                 }
             )
             try:
@@ -213,6 +259,21 @@ class WaveQLCursor:
                 
                 step.finish()
                 self._rowcount = len(data) if data else 0
+                
+                # Store in cache if enabled
+                if cache_key is not None and data is not None:
+                    cache.put(
+                        key=cache_key,
+                        data=data,
+                        adapter_name=adapter.adapter_name,
+                        table_name=clean_table,
+                    )
+                    logger.debug(
+                        "Cache store: adapter=%s, table=%s, rows=%d, size=%.2fMB",
+                        adapter.adapter_name, clean_table, len(data),
+                        data.nbytes / (1024 * 1024)
+                    )
+                
                 return data
             except NotImplementedError:
                 step.finish()
@@ -266,6 +327,8 @@ class WaveQLCursor:
                 values=query_info.values,
                 parameters=parameters,
             )
+            # Invalidate cache for this table after write
+            self._connection._cache.invalidate(table=clean_table)
             return None
         
         elif query_info.operation == "UPDATE":
@@ -275,6 +338,8 @@ class WaveQLCursor:
                 predicates=query_info.predicates,
                 parameters=parameters,
             )
+            # Invalidate cache for this table after write
+            self._connection._cache.invalidate(table=clean_table)
             return None
         
         elif query_info.operation == "DELETE":
@@ -283,6 +348,8 @@ class WaveQLCursor:
                 predicates=query_info.predicates,
                 parameters=parameters,
             )
+            # Invalidate cache for this table after write
+            self._connection._cache.invalidate(table=clean_table)
             return None
         
         else:

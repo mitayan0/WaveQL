@@ -111,14 +111,8 @@ class ServiceNowAdapter(BaseAdapter):
         if bool(group_by or aggregates):
             return self._fetch_stats(table, predicates, group_by, aggregates, order_by, limit)
 
-        # 1. Resolve columns
-        # If columns is None/empty/star, we fetch all returned fields (or explicit sysparm_fields if desired)
+        # Note: If columns is None/empty/star, we fetch all returned fields.
         # ServiceNow returns all fields by default if sysparm_fields is not set.
-        # However, for schema consistency, we might want to discover schema first if wildcard.
-        if not columns or columns == ["*"]:
-            query_cols = []  # Empty means all
-        else:
-            query_cols = columns
         
         # Build URL and params
         table_name = self._extract_table_name(table)
@@ -167,10 +161,7 @@ class ServiceNowAdapter(BaseAdapter):
         if bool(group_by or aggregates):
             return await self._fetch_stats_async(table, predicates, group_by, aggregates, order_by, limit)
 
-        if not columns or columns == ["*"]:
-            query_cols = []
-        else:
-            query_cols = columns
+        # Note: Column selection handled in _build_query_params
         
         url = f"{self._host}/api/now/table/{table_name}"
         params = self._build_query_params(columns, predicates, limit, offset, order_by)
@@ -356,55 +347,93 @@ class ServiceNowAdapter(BaseAdapter):
                 raise AdapterError(f"ServiceNow request failed: {e}")
     
     async def _fetch_all_pages_async(self, url: str, params: Dict, limit: int = None) -> List[Dict]:
-        """Fetch all pages asynchronously (simple loop for now)."""
-        all_records = []
+        """Fetch all pages asynchronously with parallel requests for better performance."""
+        import anyio
+        
         page_size = int(params.get("sysparm_limit", self._page_size))
         
-        offset = 0
+        # First, fetch the initial page to understand the data
+        first_page_params = {**params, "sysparm_offset": "0", "sysparm_limit": str(page_size)}
+        first_page = await self._fetch_page_async(url, first_page_params)
+        
+        if len(first_page) < page_size:
+            # Only one page needed
+            return first_page[:limit] if limit else first_page
+        
+        all_records = list(first_page)
+        
+        # Calculate how many more pages we might need
+        max_pages = min(self._max_parallel, 10)  # Cap at 10 concurrent requests
+        if limit:
+            remaining = limit - len(all_records)
+            estimated_pages = (remaining + page_size - 1) // page_size
+            max_pages = min(max_pages, estimated_pages)
+        
+        # Fetch remaining pages in parallel batches
+        offset = page_size
         while True:
-            page_params = {**params, "sysparm_offset": str(offset), "sysparm_limit": str(page_size)}
-            records = await self._fetch_page_async(url, page_params)
-            all_records.extend(records)
+            # Create batch of page requests
+            batch_offsets = []
+            for i in range(max_pages):
+                if limit and offset >= limit:
+                    break
+                batch_offsets.append(offset)
+                offset += page_size
             
-            if len(records) < page_size:
+            if not batch_offsets:
                 break
+            
+            # Fetch batch in parallel
+            async def fetch_offset(off: int) -> List[Dict]:
+                page_params = {**params, "sysparm_offset": str(off), "sysparm_limit": str(page_size)}
+                return await self._fetch_page_async(url, page_params)
+            
+            # Use anyio task group for parallel execution
+            results = []
+            async with anyio.create_task_group() as tg:
+                async def fetch_and_store(off: int, idx: int):
+                    result = await fetch_offset(off)
+                    results.append((idx, result))
                 
-            offset += page_size
-            if limit and offset >= limit:
+                for idx, off in enumerate(batch_offsets):
+                    tg.start_soon(fetch_and_store, off, idx)
+            
+            # Sort by index to maintain order and extend
+            results.sort(key=lambda x: x[0])
+            
+            found_partial = False
+            for _, records in results:
+                all_records.extend(records)
+                if len(records) < page_size:
+                    found_partial = True
+                    break
+            
+            if found_partial:
+                break
+            
+            if limit and len(all_records) >= limit:
                 break
         
         return all_records[:limit] if limit else all_records
 
     def _fetch_all_pages(self, url: str, params: Dict, limit: int = None) -> List[Dict]:
-        """Fetch all pages using ParallelFetcher for high-throughput retrieval."""
+        """Fetch all pages sequentially until a partial page is returned."""
         all_records = []
         page_size = int(params.get("sysparm_limit", self._page_size))
+        offset = 0
         
-        # 1. Fetch first page sequentially to check if we even need parallel
-        first_params = {**params, "sysparm_offset": "0"}
-        first_page = self._fetch_page(url, first_params)
-        all_records.extend(first_page)
-        
-        # If first page is not full, we are done
-        if len(first_page) < page_size:
-            return all_records
+        while True:
+            page_params = {**params, "sysparm_offset": str(offset)}
+            records = self._fetch_page(url, page_params)
+            all_records.extend(records)
             
-        # 2. Need more pages - use ParallelFetcher starting from page 1
-        def fetch_page_by_number(page_num: int) -> List[Dict]:
-            """Fetch a specific page by number."""
-            page_params = {**params, "sysparm_offset": str(page_num * page_size)}
-            return self._fetch_page(url, page_params)
-        
-        result_table = self._parallel_fetcher.fetch_parallel(
-            fetch_func=fetch_page_by_number,
-            total_pages=None,
-            stop_on_empty=True,
-            start_page=1, # Start from page 1
-        )
-        
-        # Combine first page with parallel results
-        if len(result_table) > 0:
-            all_records.extend(result_table.to_pylist())
+            # Stop if page is not full (indicates last page) or if we've hit the limit
+            if len(records) < page_size:
+                break
+                
+            offset += page_size
+            if limit and len(all_records) >= limit:
+                break
         
         return all_records[:limit] if limit else all_records
     
@@ -557,7 +586,7 @@ class ServiceNowAdapter(BaseAdapter):
         values: Dict[str, Any],
         parameters: Sequence = None,
     ) -> int:
-        """Insert a record into ServiceNow (async)."""
+        """Insert a record into ServiceNow (async) with rate limiting."""
         table_name = self._extract_table_name(table)
         url = f"{self._host}/api/now/table/{table_name}"
         headers = {
@@ -565,10 +594,24 @@ class ServiceNowAdapter(BaseAdapter):
             "Content-Type": "application/json",
             **await self._get_auth_headers_async(),
         }
+        
         client = self._get_async_client()
-        response = await client.post(url, json=values, headers=headers, timeout=self._timeout)
-        response.raise_for_status()
-        return 1
+        
+        async def do_insert():
+            response = await client.post(url, json=values, headers=headers, timeout=self._timeout)
+            if response.status_code == 429:
+                retry_after = int(response.headers.get("Retry-After", 60))
+                raise RateLimitError("Rate limit exceeded", retry_after=retry_after)
+            response.raise_for_status()
+            return response
+        
+        try:
+            await self._rate_limiter.execute_with_retry_async(do_insert)
+            return 1
+        except RateLimitError:
+            raise
+        except httpx.HTTPError as e:
+            raise QueryError(f"INSERT failed (async): {e}")
 
     def insert(
         self,
@@ -576,7 +619,7 @@ class ServiceNowAdapter(BaseAdapter):
         values: Dict[str, Any],
         parameters: Sequence = None,
     ) -> int:
-        """Insert a record into ServiceNow."""
+        """Insert a record into ServiceNow with rate limiting."""
         table_name = self._extract_table_name(table)
         url = f"{self._host}/api/now/table/{table_name}"
         
@@ -586,15 +629,24 @@ class ServiceNowAdapter(BaseAdapter):
             **self._get_auth_headers(),
         }
         
-        try:
-            with self._get_session() as session:
+        with self._get_session() as session:
+            def do_insert():
                 response = session.post(
                     url, json=values, headers=headers, timeout=self._timeout
                 )
+                if response.status_code == 429:
+                    retry_after = int(response.headers.get("Retry-After", 60))
+                    raise RateLimitError("Rate limit exceeded", retry_after=retry_after)
                 response.raise_for_status()
+                return response
+            
+            try:
+                self._rate_limiter.execute_with_retry(do_insert)
                 return 1
-        except requests.RequestException as e:
-            raise QueryError(f"INSERT failed: {e}")
+            except RateLimitError:
+                raise
+            except requests.RequestException as e:
+                raise QueryError(f"INSERT failed: {e}")
     
     async def update_async(
         self,
@@ -603,26 +655,57 @@ class ServiceNowAdapter(BaseAdapter):
         predicates: List["Predicate"] = None,
         parameters: Sequence = None,
     ) -> int:
-        """Update records in ServiceNow (async)."""
-        table_name = self._extract_table_name(table)
-        sys_id = None
-        for pred in (predicates or []):
-            if pred.column.lower() == "sys_id" and pred.operator == "=":
-                sys_id = pred.value
-                break
-        if not sys_id:
-            raise QueryError("UPDATE requires sys_id in WHERE clause")
+        """Update records in ServiceNow (async) with rate limiting and bulk support.
         
-        url = f"{self._host}/api/now/table/{table_name}/{sys_id}"
+        Supports:
+        - Single update: WHERE sys_id = 'value'
+        - Bulk update: WHERE sys_id IN ('v1', 'v2', ...)
+        """
+        table_name = self._extract_table_name(table)
+        
+        # Get sys_id(s) from predicates - support both = and IN operators
+        sys_ids = []
+        for pred in (predicates or []):
+            if pred.column.lower() == "sys_id":
+                if pred.operator == "=":
+                    sys_ids = [pred.value]
+                    break
+                elif pred.operator == "IN" and isinstance(pred.value, (list, tuple)):
+                    sys_ids = list(pred.value)
+                    break
+        
+        if not sys_ids:
+            raise QueryError("UPDATE requires sys_id in WHERE clause (use = or IN operator)")
+        
         headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",
             **await self._get_auth_headers_async(),
         }
+        
         client = self._get_async_client()
-        response = await client.patch(url, json=values, headers=headers, timeout=self._timeout)
-        response.raise_for_status()
-        return 1
+        updated_count = 0
+        
+        for sys_id in sys_ids:
+            url = f"{self._host}/api/now/table/{table_name}/{sys_id}"
+            
+            async def do_update():
+                response = await client.patch(url, json=values, headers=headers, timeout=self._timeout)
+                if response.status_code == 429:
+                    retry_after = int(response.headers.get("Retry-After", 60))
+                    raise RateLimitError("Rate limit exceeded", retry_after=retry_after)
+                response.raise_for_status()
+                return response
+            
+            try:
+                await self._rate_limiter.execute_with_retry_async(do_update)
+                updated_count += 1
+            except RateLimitError:
+                raise
+            except httpx.HTTPError as e:
+                raise QueryError(f"UPDATE failed for sys_id={sys_id} (async): {e}")
+        
+        return updated_count
 
     def update(
         self,
@@ -631,20 +714,27 @@ class ServiceNowAdapter(BaseAdapter):
         predicates: List["Predicate"] = None,
         parameters: Sequence = None,
     ) -> int:
-        """Update records in ServiceNow."""
+        """Update records in ServiceNow with rate limiting and bulk support.
+        
+        Supports:
+        - Single update: WHERE sys_id = 'value'
+        - Bulk update: WHERE sys_id IN ('v1', 'v2', ...)
+        """
         table_name = self._extract_table_name(table)
         
-        # Get sys_id from predicates
-        sys_id = None
+        # Get sys_id(s) from predicates - support both = and IN operators
+        sys_ids = []
         for pred in (predicates or []):
-            if pred.column.lower() == "sys_id" and pred.operator == "=":
-                sys_id = pred.value
-                break
+            if pred.column.lower() == "sys_id":
+                if pred.operator == "=":
+                    sys_ids = [pred.value]
+                    break
+                elif pred.operator == "IN" and isinstance(pred.value, (list, tuple)):
+                    sys_ids = list(pred.value)
+                    break
         
-        if not sys_id:
-            raise QueryError("UPDATE requires sys_id in WHERE clause")
-        
-        url = f"{self._host}/api/now/table/{table_name}/{sys_id}"
+        if not sys_ids:
+            raise QueryError("UPDATE requires sys_id in WHERE clause (use = or IN operator)")
         
         headers = {
             "Accept": "application/json",
@@ -652,15 +742,30 @@ class ServiceNowAdapter(BaseAdapter):
             **self._get_auth_headers(),
         }
         
-        try:
-            with self._get_session() as session:
-                response = session.patch(
-                    url, json=values, headers=headers, timeout=self._timeout
-                )
-                response.raise_for_status()
-                return 1
-        except requests.RequestException as e:
-            raise QueryError(f"UPDATE failed: {e}")
+        updated_count = 0
+        with self._get_session() as session:
+            for sys_id in sys_ids:
+                url = f"{self._host}/api/now/table/{table_name}/{sys_id}"
+                
+                def do_update():
+                    response = session.patch(
+                        url, json=values, headers=headers, timeout=self._timeout
+                    )
+                    if response.status_code == 429:
+                        retry_after = int(response.headers.get("Retry-After", 60))
+                        raise RateLimitError("Rate limit exceeded", retry_after=retry_after)
+                    response.raise_for_status()
+                    return response
+                
+                try:
+                    self._rate_limiter.execute_with_retry(do_update)
+                    updated_count += 1
+                except RateLimitError:
+                    raise
+                except requests.RequestException as e:
+                    raise QueryError(f"UPDATE failed for sys_id={sys_id}: {e}")
+        
+        return updated_count
     
     async def delete_async(
         self,
@@ -668,25 +773,56 @@ class ServiceNowAdapter(BaseAdapter):
         predicates: List["Predicate"] = None,
         parameters: Sequence = None,
     ) -> int:
-        """Delete a record from ServiceNow (async)."""
-        table_name = self._extract_table_name(table)
-        sys_id = None
-        for pred in (predicates or []):
-            if pred.column.lower() == "sys_id" and pred.operator == "=":
-                sys_id = pred.value
-                break
-        if not sys_id:
-            raise QueryError("DELETE requires sys_id in WHERE clause")
+        """Delete records from ServiceNow (async) with rate limiting and bulk support.
         
-        url = f"{self._host}/api/now/table/{table_name}/{sys_id}"
+        Supports:
+        - Single delete: WHERE sys_id = 'value'
+        - Bulk delete: WHERE sys_id IN ('v1', 'v2', ...)
+        """
+        table_name = self._extract_table_name(table)
+        
+        # Get sys_id(s) from predicates - support both = and IN operators
+        sys_ids = []
+        for pred in (predicates or []):
+            if pred.column.lower() == "sys_id":
+                if pred.operator == "=":
+                    sys_ids = [pred.value]
+                    break
+                elif pred.operator == "IN" and isinstance(pred.value, (list, tuple)):
+                    sys_ids = list(pred.value)
+                    break
+        
+        if not sys_ids:
+            raise QueryError("DELETE requires sys_id in WHERE clause (use = or IN operator)")
+        
         headers = {
             "Accept": "application/json",
             **await self._get_auth_headers_async(),
         }
+        
         client = self._get_async_client()
-        response = await client.delete(url, headers=headers, timeout=self._timeout)
-        response.raise_for_status()
-        return 1
+        deleted_count = 0
+        
+        for sys_id in sys_ids:
+            url = f"{self._host}/api/now/table/{table_name}/{sys_id}"
+            
+            async def do_delete():
+                response = await client.delete(url, headers=headers, timeout=self._timeout)
+                if response.status_code == 429:
+                    retry_after = int(response.headers.get("Retry-After", 60))
+                    raise RateLimitError("Rate limit exceeded", retry_after=retry_after)
+                response.raise_for_status()
+                return response
+            
+            try:
+                await self._rate_limiter.execute_with_retry_async(do_delete)
+                deleted_count += 1
+            except RateLimitError:
+                raise
+            except httpx.HTTPError as e:
+                raise QueryError(f"DELETE failed for sys_id={sys_id} (async): {e}")
+        
+        return deleted_count
 
     def delete(
         self,
@@ -694,33 +830,55 @@ class ServiceNowAdapter(BaseAdapter):
         predicates: List["Predicate"] = None,
         parameters: Sequence = None,
     ) -> int:
-        """Delete a record from ServiceNow."""
+        """Delete records from ServiceNow with rate limiting and bulk support.
+        
+        Supports:
+        - Single delete: WHERE sys_id = 'value'
+        - Bulk delete: WHERE sys_id IN ('v1', 'v2', ...)
+        """
         table_name = self._extract_table_name(table)
         
-        # Get sys_id from predicates
-        sys_id = None
+        # Get sys_id(s) from predicates - support both = and IN operators
+        sys_ids = []
         for pred in (predicates or []):
-            if pred.column.lower() == "sys_id" and pred.operator == "=":
-                sys_id = pred.value
-                break
+            if pred.column.lower() == "sys_id":
+                if pred.operator == "=":
+                    sys_ids = [pred.value]
+                    break
+                elif pred.operator == "IN" and isinstance(pred.value, (list, tuple)):
+                    sys_ids = list(pred.value)
+                    break
         
-        if not sys_id:
-            raise QueryError("DELETE requires sys_id in WHERE clause")
-        
-        url = f"{self._host}/api/now/table/{table_name}/{sys_id}"
+        if not sys_ids:
+            raise QueryError("DELETE requires sys_id in WHERE clause (use = or IN operator)")
         
         headers = {
             "Accept": "application/json",
             **self._get_auth_headers(),
         }
         
-        try:
-            with self._get_session() as session:
-                response = session.delete(url, headers=headers, timeout=self._timeout)
-                response.raise_for_status()
-                return 1
-        except requests.RequestException as e:
-            raise QueryError(f"DELETE failed: {e}")
+        deleted_count = 0
+        with self._get_session() as session:
+            for sys_id in sys_ids:
+                url = f"{self._host}/api/now/table/{table_name}/{sys_id}"
+                
+                def do_delete():
+                    response = session.delete(url, headers=headers, timeout=self._timeout)
+                    if response.status_code == 429:
+                        retry_after = int(response.headers.get("Retry-After", 60))
+                        raise RateLimitError("Rate limit exceeded", retry_after=retry_after)
+                    response.raise_for_status()
+                    return response
+                
+                try:
+                    self._rate_limiter.execute_with_retry(do_delete)
+                    deleted_count += 1
+                except RateLimitError:
+                    raise
+                except requests.RequestException as e:
+                    raise QueryError(f"DELETE failed for sys_id={sys_id}: {e}")
+        
+        return deleted_count
     
     async def list_tables_async(self) -> List[str]:
         """List available ServiceNow tables (async)."""

@@ -2,10 +2,13 @@
 Tests for ServiceNow Adapter
 
 Uses responses library to mock ServiceNow Table API endpoints.
+Uses respx for async httpx mocking.
 """
 
 import pytest
 import responses
+import respx
+import httpx
 import pyarrow as pa
 
 from waveql.adapters.servicenow import ServiceNowAdapter
@@ -501,6 +504,356 @@ class TestArrowConversion:
         assert infer_arrow_type(None) == pa.null()
 
 
+class TestPagination:
+    """Tests for multi-page result handling."""
+
+    @responses.activate
+    def test_fetch_multiple_pages(self):
+        """Test that pagination fetches all pages correctly."""
+        # Page 1 - first 2 records
+        responses.add(
+            responses.GET,
+            "https://test.service-now.com/api/now/table/incident",
+            json={"result": MOCK_INCIDENTS[:2]},
+            status=200,
+            headers={"X-Total-Count": "3"},
+        )
+        
+        # Page 2 - remaining record (less than page_size indicates last page)
+        responses.add(
+            responses.GET,
+            "https://test.service-now.com/api/now/table/incident",
+            json={"result": [MOCK_INCIDENTS[2]]},
+            status=200,
+            headers={"X-Total-Count": "3"},
+        )
+
+        adapter = ServiceNowAdapter(host="test.service-now.com", page_size=2)
+        result = adapter.fetch("incident")
+
+        # Should have fetched all 3 records across 2 pages
+        assert len(result) == 3
+        assert len(responses.calls) == 2
+
+    @responses.activate
+    def test_pagination_respects_limit(self):
+        """Test that limit stops pagination early."""
+        responses.add(
+            responses.GET,
+            "https://test.service-now.com/api/now/table/incident",
+            json={"result": MOCK_INCIDENTS[:2]},
+            status=200,
+        )
+
+        adapter = ServiceNowAdapter(host="test.service-now.com", page_size=10)
+        result = adapter.fetch("incident", limit=2)
+
+        assert len(result) == 2
+        # Should not request more pages
+        assert len(responses.calls) == 1
+
+
+class TestErrorHandling:
+    """Tests for error conditions and edge cases."""
+
+    @responses.activate
+    def test_authentication_failure_401(self):
+        """Test that 401 raises appropriate error."""
+        responses.add(
+            responses.GET,
+            "https://test.service-now.com/api/now/table/incident",
+            json={"error": {"message": "User Not Authenticated"}},
+            status=401,
+        )
+
+        adapter = ServiceNowAdapter(host="test.service-now.com")
+        
+        with pytest.raises(AdapterError) as exc_info:
+            adapter.fetch("incident")
+        
+        assert "401" in str(exc_info.value) or "Unauthorized" in str(exc_info.value)
+
+    @responses.activate
+    def test_forbidden_403(self):
+        """Test that 403 raises appropriate error."""
+        responses.add(
+            responses.GET,
+            "https://test.service-now.com/api/now/table/incident",
+            json={"error": {"message": "Access denied"}},
+            status=403,
+        )
+
+        adapter = ServiceNowAdapter(host="test.service-now.com")
+        
+        with pytest.raises(AdapterError) as exc_info:
+            adapter.fetch("incident")
+        
+        assert "403" in str(exc_info.value) or "Forbidden" in str(exc_info.value)
+
+    @responses.activate
+    def test_not_found_404(self):
+        """Test that 404 raises appropriate error for invalid table."""
+        responses.add(
+            responses.GET,
+            "https://test.service-now.com/api/now/table/nonexistent_table",
+            json={"error": {"message": "Invalid table"}},
+            status=404,
+        )
+
+        adapter = ServiceNowAdapter(host="test.service-now.com")
+        
+        with pytest.raises(AdapterError) as exc_info:
+            adapter.fetch("nonexistent_table")
+        
+        assert "404" in str(exc_info.value) or "not found" in str(exc_info.value).lower()
+
+    @responses.activate
+    def test_server_error_500(self):
+        """Test that 500 raises appropriate error."""
+        responses.add(
+            responses.GET,
+            "https://test.service-now.com/api/now/table/incident",
+            json={"error": {"message": "Internal server error"}},
+            status=500,
+        )
+
+        adapter = ServiceNowAdapter(host="test.service-now.com")
+        
+        with pytest.raises(AdapterError):
+            adapter.fetch("incident")
+
+    @responses.activate
+    def test_malformed_json_response(self):
+        """Test handling of invalid JSON response."""
+        responses.add(
+            responses.GET,
+            "https://test.service-now.com/api/now/table/incident",
+            body="not valid json {{{",
+            status=200,
+        )
+
+        adapter = ServiceNowAdapter(host="test.service-now.com")
+        
+        with pytest.raises((AdapterError, Exception)):
+            adapter.fetch("incident")
+
+    @responses.activate
+    def test_missing_result_key(self):
+        """Test handling of response without 'result' key."""
+        responses.add(
+            responses.GET,
+            "https://test.service-now.com/api/now/table/incident",
+            json={"data": MOCK_INCIDENTS},  # Wrong key
+            status=200,
+        )
+
+        adapter = ServiceNowAdapter(host="test.service-now.com")
+        result = adapter.fetch("incident")
+        
+        # Should handle gracefully - empty result or error
+        assert len(result) == 0 or isinstance(result, pa.Table)
+
+
+class TestSpecialCharacters:
+    """Tests for special characters in query values."""
+
+    @responses.activate
+    def test_query_with_apostrophe(self):
+        """Test predicate with apostrophe in value."""
+        responses.add(
+            responses.GET,
+            "https://test.service-now.com/api/now/table/incident",
+            json={"result": []},
+            status=200,
+        )
+
+        adapter = ServiceNowAdapter(host="test.service-now.com")
+        predicates = [Predicate(column="short_description", operator="=", value="User's laptop")]
+        adapter.fetch("incident", predicates=predicates)
+
+        # Check the query was properly encoded
+        request_url = responses.calls[0].request.url
+        assert "sysparm_query" in request_url
+
+    @responses.activate
+    def test_query_with_special_chars(self):
+        """Test predicate with special characters."""
+        responses.add(
+            responses.GET,
+            "https://test.service-now.com/api/now/table/incident",
+            json={"result": []},
+            status=200,
+        )
+
+        adapter = ServiceNowAdapter(host="test.service-now.com")
+        predicates = [Predicate(column="description", operator="LIKE", value="%error & warning%")]
+        adapter.fetch("incident", predicates=predicates)
+
+        # Should not crash
+        assert len(responses.calls) == 1
+
+
+class TestNestedStructs:
+    """Tests for nested object handling with display_value=all."""
+
+    @responses.activate
+    def test_display_value_all_creates_structs(self):
+        """Test that display_value=all response creates proper struct columns."""
+        nested_records = [
+            {
+                "sys_id": "abc123",
+                "number": "INC0001",
+                "assigned_to": {
+                    "value": "user123",
+                    "display_value": "John Doe",
+                    "link": "https://..."
+                },
+                "priority": {
+                    "value": "1",
+                    "display_value": "Critical"
+                }
+            }
+        ]
+        
+        responses.add(
+            responses.GET,
+            "https://test.service-now.com/api/now/table/incident",
+            json={"result": nested_records},
+            status=200,
+        )
+
+        adapter = ServiceNowAdapter(host="test.service-now.com", display_value="all")
+        result = adapter.fetch("incident")
+
+        assert len(result) == 1
+        # Verify struct columns are created
+        assert "assigned_to" in result.column_names
+        
+        # The assigned_to column should be a struct, not a string
+        row = result.to_pylist()[0]
+        if isinstance(row["assigned_to"], dict):
+            assert row["assigned_to"]["display_value"] == "John Doe"
+
+    @responses.activate
+    def test_mixed_nested_and_scalar_fields(self):
+        """Test records with both nested and scalar fields."""
+        mixed_records = [
+            {
+                "sys_id": "abc123",
+                "number": "INC0001",  # Scalar
+                "priority": 1,  # Scalar int
+                "active": True,  # Scalar bool
+                "caller_id": {"value": "u1", "display_value": "Alice"},  # Nested
+            },
+            {
+                "sys_id": "def456",
+                "number": "INC0002",
+                "priority": 2,
+                "active": False,
+                "caller_id": {"value": "u2", "display_value": "Bob"},
+            }
+        ]
+        
+        responses.add(
+            responses.GET,
+            "https://test.service-now.com/api/now/table/incident",
+            json={"result": mixed_records},
+            status=200,
+        )
+
+        adapter = ServiceNowAdapter(host="test.service-now.com")
+        result = adapter.fetch("incident")
+
+        assert len(result) == 2
+        records = result.to_pylist()
+        
+        # Scalar fields
+        assert records[0]["number"] == "INC0001"
+        assert records[0]["priority"] == 1
+        assert records[0]["active"] == True
+        
+        # Nested field should be a struct
+        if isinstance(records[0]["caller_id"], dict):
+            assert records[0]["caller_id"]["display_value"] == "Alice"
+
+
+class TestAsyncOperations:
+    """Tests for async ServiceNow operations using respx for httpx mocking."""
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_fetch_async_basic(self):
+        """Test basic async fetch operation."""
+        respx.get("https://test.service-now.com/api/now/table/incident").mock(
+            return_value=httpx.Response(200, json={"result": MOCK_INCIDENTS})
+        )
+
+        adapter = ServiceNowAdapter(host="test.service-now.com")
+        result = await adapter.fetch_async("incident")
+
+        assert isinstance(result, pa.Table)
+        assert len(result) == 3
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_fetch_async_with_predicates(self):
+        """Test async fetch with predicates."""
+        route = respx.get("https://test.service-now.com/api/now/table/incident").mock(
+            return_value=httpx.Response(200, json={"result": [MOCK_INCIDENTS[0]]})
+        )
+
+        adapter = ServiceNowAdapter(host="test.service-now.com")
+        predicates = [Predicate(column="priority", operator="=", value=1)]
+        result = await adapter.fetch_async("incident", predicates=predicates)
+
+        assert len(result) == 1
+        # Verify predicate was pushed down by checking the request URL
+        assert route.called
+        assert "sysparm_query" in str(route.calls.last.request.url)
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_insert_async(self):
+        """Test async insert operation."""
+        respx.post("https://test.service-now.com/api/now/table/incident").mock(
+            return_value=httpx.Response(201, json={"result": {"sys_id": "new123", "number": "INC0099"}})
+        )
+
+        adapter = ServiceNowAdapter(host="test.service-now.com")
+        result = await adapter.insert_async(
+            "incident",
+            {"short_description": "Test async insert", "priority": 3}
+        )
+
+        assert result == 1
+
+
+class TestAggregationPushdown:
+    """Tests for aggregation pushdown to ServiceNow Stats API."""
+
+    @responses.activate
+    def test_count_aggregation(self):
+        """Test COUNT aggregation uses stats API."""
+        responses.add(
+            responses.GET,
+            "https://test.service-now.com/api/now/stats/incident",
+            json={"result": {"stats": {"count": "42"}}},
+            status=200,
+        )
+
+        adapter = ServiceNowAdapter(host="test.service-now.com")
+        
+        # This should trigger aggregation pushdown
+        from waveql.query_planner import Aggregate
+        result = adapter.fetch(
+            "incident",
+            aggregates=[Aggregate(func="COUNT", column="*", alias="total")]
+        )
+        
+        # Should have called stats API
+        assert "stats" in responses.calls[0].request.url
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+

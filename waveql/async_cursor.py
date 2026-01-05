@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
 import re
 import uuid
+import logging
 import anyio
 import pyarrow as pa
 
@@ -19,6 +20,8 @@ from waveql.query_planner import QueryPlanner
 
 if TYPE_CHECKING:
     from waveql.async_connection import AsyncWaveQLConnection
+
+logger = logging.getLogger(__name__)
 
 
 class AsyncWaveQLCursor:
@@ -73,7 +76,41 @@ class AsyncWaveQLCursor:
         return self._connection.get_adapter("default")
 
     async def _execute_via_adapter_async(self, query_info, adapter, parameters) -> pa.Table:
+        """Execute query via adapter with predicate pushdown and caching."""
+        # Clean table name
+        clean_table = query_info.table.split(".")[-1].strip('"') if query_info.table else query_info.table
+        
         if query_info.operation == "SELECT":
+            # Check cache first
+            cache = self._connection._cache
+            cache_key = None
+            
+            if cache.config.enabled and cache.config.should_cache_table(query_info.table):
+                # Generate cache key
+                cache_key = cache.generate_key(
+                    adapter_name=adapter.adapter_name,
+                    table=clean_table,
+                    columns=tuple(query_info.columns) if query_info.columns else ("*",),
+                    predicates=tuple(
+                        (p.column, p.operator, p.value) for p in query_info.predicates
+                    ) if query_info.predicates else (),
+                    limit=query_info.limit,
+                    offset=query_info.offset,
+                    order_by=tuple(query_info.order_by) if query_info.order_by else None,
+                    group_by=tuple(query_info.group_by) if query_info.group_by else None,
+                )
+                
+                # Try to get from cache
+                cached_result = cache.get(cache_key)
+                if cached_result is not None:
+                    self._rowcount = len(cached_result)
+                    logger.debug(
+                        "Cache hit (async): adapter=%s, table=%s, rows=%d",
+                        adapter.adapter_name, clean_table, len(cached_result)
+                    )
+                    return cached_result
+            
+            # Cache miss - fetch from adapter
             try:
                 data = await adapter.fetch_async(
                     table=query_info.table,
@@ -86,6 +123,20 @@ class AsyncWaveQLCursor:
                     aggregates=query_info.aggregates,
                 )
                 self._rowcount = len(data) if data else 0
+                
+                # Store in cache if enabled
+                if cache_key is not None and data is not None:
+                    cache.put(
+                        key=cache_key,
+                        data=data,
+                        adapter_name=adapter.adapter_name,
+                        table_name=clean_table,
+                    )
+                    logger.debug(
+                        "Cache store (async): adapter=%s, table=%s, rows=%d",
+                        adapter.adapter_name, clean_table, len(data)
+                    )
+                
                 return data
             except NotImplementedError:
                 # Fallback to local SQL
@@ -98,12 +149,18 @@ class AsyncWaveQLCursor:
         
         elif query_info.operation == "INSERT":
             self._rowcount = await adapter.insert_async(table=query_info.table, values=query_info.values, parameters=parameters)
+            # Invalidate cache for this table
+            self._connection._cache.invalidate(table=clean_table)
             return None
         elif query_info.operation == "UPDATE":
             self._rowcount = await adapter.update_async(table=query_info.table, values=query_info.values, predicates=query_info.predicates, parameters=parameters)
+            # Invalidate cache for this table
+            self._connection._cache.invalidate(table=clean_table)
             return None
         elif query_info.operation == "DELETE":
             self._rowcount = await adapter.delete_async(table=query_info.table, predicates=query_info.predicates, parameters=parameters)
+            # Invalidate cache for this table
+            self._connection._cache.invalidate(table=clean_table)
             return None
         else:
             raise QueryError(f"Unsupported operation: {query_info.operation}")
