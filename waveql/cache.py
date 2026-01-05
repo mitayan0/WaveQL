@@ -268,6 +268,8 @@ class QueryCache:
             Cached Arrow table or None if not found/expired
         """
         if not self.config.enabled:
+            # Still track misses when cache is disabled for accurate statistics
+            self._stats.misses += 1
             return None
         
         with self._lock:

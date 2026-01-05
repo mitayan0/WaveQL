@@ -527,7 +527,7 @@ class WaveQLCursor:
             return table
 
         except Exception as e:
-            raise QueryError(f"Virtual join failed: {e}")
+            raise QueryError(f"Virtual join failed: {e}") from e
         finally:
             for view_name in created_views:
                 try:

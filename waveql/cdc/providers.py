@@ -193,11 +193,11 @@ class ServiceNowCDCProvider(BaseCDCProvider):
         
         result = await anyio.to_thread.run_sync(fetch)
         
-        # Convert to Change objects
+        # Convert to Change objects using safer iteration
         changes = []
-        for i in range(len(result)):
-            row = {name: result.column(name)[i].as_py() for name in result.column_names}
-            
+        # Use to_pylist() which is safer than direct column indexing
+        rows = result.to_pylist() if result and len(result) > 0 else []
+        for row in rows:
             change = Change(
                 table=table,
                 operation=self._detect_operation(row, "sys_created_on", "sys_updated_on"),
@@ -320,9 +320,9 @@ class SalesforceCDCProvider(BaseCDCProvider):
         result = await anyio.to_thread.run_sync(fetch)
         
         changes = []
-        for i in range(len(result)):
-            row = {name: result.column(name)[i].as_py() for name in result.column_names}
-            
+        # Use to_pylist() which is safer than direct column indexing
+        rows = result.to_pylist() if result and len(result) > 0 else []
+        for row in rows:
             # Detect operation
             if row.get("IsDeleted"):
                 operation = ChangeType.DELETE
@@ -427,9 +427,9 @@ class JiraCDCProvider(BaseCDCProvider):
         result = await anyio.to_thread.run_sync(fetch)
         
         changes = []
-        for i in range(len(result)):
-            row = {name: result.column(name)[i].as_py() for name in result.column_names}
-            
+        # Use to_pylist() which is safer than direct column indexing
+        rows = result.to_pylist() if result and len(result) > 0 else []
+        for row in rows:
             change = Change(
                 table=table,
                 operation=self._detect_operation(row, "created", "updated"),

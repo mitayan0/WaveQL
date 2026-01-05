@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-01-05
+
+### Added
+
+- **Complex Predicate Extraction** (Query Optimizer Enhancement)
+  - Support for nested OR conditions with intelligent optimization
+  - Automatic conversion of OR groups to IN predicates when all conditions target the same column
+    - Example: `status = 'open' OR status = 'closed'` → `status IN ('open', 'closed')`
+  - New `CompoundPredicate` class for representing complex predicate trees
+  - API-specific filter generation for ServiceNow (^OR), Salesforce (OR), and Jira
+  - Adapter capability detection for optimal pushdown strategy
+
+- **Subquery Pushdown Optimization**
+  - Detection and analysis of subqueries in WHERE clauses
+  - Same-adapter optimization: pushes entire subquery when inner and outer tables are on same adapter
+  - Cross-adapter strategy: materializes inner query results for outer query IN predicates
+  - New `SubqueryInfo` and `SubqueryPushdownOptimizer` classes
+
+- **SQLAlchemy & Pandas Integration Guide** (`docs/pandas-sqlalchemy-guide.md`)
+  - Complete Pandas integration examples with `pd.read_sql()`
+  - SQLAlchemy ORM usage patterns and connection string formats
+  - BI tool integration guides (Superset, Metabase, Jupyter, Streamlit)
+  - Performance optimization best practices
+  - ETL pipeline examples with real-world patterns
+  - Async support with Pandas
+  - Chunked reading for large datasets
+
+### Changed
+
+- **QueryPlanner**: Enhanced `_parse_condition()` to handle OR groups and parenthesized expressions
+- **QueryInfo**: Added `compound_predicates`, `subqueries`, and `has_complex_or` fields
+
+### Tests
+
+- Added comprehensive test suite for complex predicates (`test_complex_predicates.py`)
+  - 24 new tests covering OR extraction, IN conversion, and subquery analysis
+
+
 ## [0.1.1] - 2026-01-03
 
 ### Added

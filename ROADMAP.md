@@ -1,7 +1,7 @@
 # WaveQL Project Roadmap
 
-> **Last Updated:** 2026-01-04  
-> **Current Version:** 0.1.1
+> **Last Updated:** 2026-01-05  
+> **Current Version:** 0.1.5
 
 ---
 
@@ -65,7 +65,7 @@
 
 ---
 
-## 🚧 In Progress (v0.2.0)
+## ✅ Completed in v0.1.5
 
 ### Materialized Views ✅ NEW
 - [x] **Materialized Views**: Local Parquet snapshots of remote tables
@@ -83,35 +83,59 @@
   - [x] Configurable polling intervals
   - [x] Change type detection (insert/update/delete)
 
-### Query Optimizer Enhancements
-- [ ] Complex predicate extraction (nested `OR` support)
-- [ ] Subquery pushdown for single-adapter sources
+### Query Optimizer Enhancements ✅ NEW
+- [x] **Complex predicate extraction** (nested `OR` support)
+  - [x] OR-to-IN conversion for same-column equality conditions
+  - [x] Compound predicate representation for multi-column OR
+  - [x] API-specific filter generation (ServiceNow, Salesforce, Jira)
+- [x] **Subquery pushdown** for single-adapter sources
+  - [x] Subquery detection and analysis
+  - [x] Same-adapter optimization (push entire query)
+  - [x] Cross-adapter materialization strategy
 
-### Integration & Ecosystem
-- [ ] SQLAlchemy/Pandas integration guide (`pd.read_sql`)
-- [ ] BI tool integration (Superset, Metabase)
+### Integration & Ecosystem ✅ NEW
+- [x] **SQLAlchemy/Pandas integration guide** (`pd.read_sql`)
+  - [x] Complete Pandas integration examples
+  - [x] SQLAlchemy ORM usage patterns
+  - [x] BI tool integration (Superset, Metabase, Jupyter)
+  - [x] Performance optimization guide
+  - [x] ETL pipeline examples
 
 ---
 
 ## 📋 Planned Features
 
-### v0.3.0 - Data Contracts & Validation
-- [ ] **Data Contracts**: YAML-based schema validation
+### v0.1.6 - Data Contracts & Validation
+- [ ] **Data Contracts**: Pydantic-based schema validation
+  - [ ] `DataContract` model for table schemas
+  - [ ] Runtime validation of API responses
+  - [ ] JSON Schema export for documentation
 - [ ] **Schema Change Detection**: Alert on API schema changes
+  - [ ] Compare cached vs live schema
+  - [ ] Emit warnings for breaking changes
+  - [ ] Optional strict mode (fail on schema mismatch)
 
-### v0.4.0 - Streaming & Scalability
+### v0.1.7 - Streaming & Scalability
 - [ ] Generator-based streaming for large result sets (RecordBatch yielding)
 - [ ] Memory-efficient fetching for million-row exports
+- [ ] Backpressure support for async streams
 
-### v0.5.0 - More Adapters
+### v0.1.8 - Cloud Storage Adapters
 - [ ] **Cloud Storage** (S3, GCS, Azure Blob via DuckDB)
 - [ ] **Google Sheets Adapter**
-- [ ] **SaaS Expansion**: HubSpot, Shopify, Zendesk, Stripe
+- [ ] Credential provider chain (env vars, config files, IAM roles)
 
-### Future
+### v0.1.9 - SaaS Expansion
+- [ ] **HubSpot Adapter** (CRM, Contacts, Deals)
+- [ ] **Shopify Adapter** (Orders, Products, Customers)
+- [ ] **Zendesk Adapter** (Tickets, Users, Organizations)
+- [ ] **Stripe Adapter** (Payments, Subscriptions, Customers)
+
+### v0.2.0 - Production Ready
 - [ ] **Integration Tests**: Live testing against real sandbox environments
-- [ ] GraphQL adapter support
-- [ ] Custom adapter SDK / plugin system
+- [ ] **GraphQL Adapter**: Generic GraphQL source support
+- [ ] **Plugin System**: Custom adapter SDK for third-party extensions
+- [ ] Stable API guarantee (no breaking changes in 0.2.x)
 
 ---
 
