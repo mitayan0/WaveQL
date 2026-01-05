@@ -73,6 +73,13 @@ Rich, developer-friendly error messages with actionable suggestions.
 *   [Rate Limit Handling](error-handling.md#rate-limit-handling)
 *   [Schema Evolution Errors](error-handling.md#schema-evolution-errors)
 
+### [Data Contracts](contracts.md) ✨ NEW
+Pydantic-based schema validation for type-safe data pipelines.
+*   [Defining Contracts](contracts.md#quick-start) - Type-safe column definitions
+*   [Runtime Validation](contracts.md#validate-data) - Catch mismatches early
+*   [Schema Drift Detection](contracts.md#schema-drift-detection) - Alert on API changes
+*   [JSON Schema Export](contracts.md#json-schema-export) - Auto-generated documentation
+
 ## Reference
 
 ### [API Reference](api.md)
@@ -97,8 +104,11 @@ WaveQL connects to *anything*:
 **2. The "Join Global" Engine**
 WaveQL embeds a powerful in-memory analytical engine (DuckDB) that allows you to perform **federated queries**. You can join a table from ServiceNow with a local Excel file and a PostgreSQL database in a single SQL statement.
 
-**3. Pushdown Optimization**
-While we allow you to join anything, we respect the source's capabilities. WaveQL intelligently pushes down filters (`WHERE` clauses) and aggregations to the source system whenever possible to minimize data transfer.
+**3. Pushdown-First Philosophy**
+We optimize at the source, not the client. WaveQL intelligently pushes down filters (`WHERE` clauses) and aggregations to the source system whenever possible, falling back to local processing only when necessary to minimize data transfer.
 
 **4. Zero-Copy Transport**
 We utilize Apache Arrow to move data efficiently between systems, minimizing serialization overhead and ensuring high performance for data science workflows.
+
+### [Read our full Design Principles →](design-principles.md)
+Explore our deep-dive on why we chose SQL, how our predicate pushdown works, and why we use Apache Arrow and Pydantic.
