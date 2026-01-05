@@ -71,6 +71,8 @@ class AsyncWaveQLCursor:
         if not table_name: return None
         if "." in table_name:
             schema, _ = table_name.split(".", 1)
+            # Strip quotes from schema name for lookup
+            schema = schema.strip('"')
             adapter = self._connection.get_adapter(schema)
             if adapter: return adapter
         return self._connection.get_adapter("default")
@@ -207,11 +209,11 @@ class AsyncWaveQLCursor:
             # Execute JOIN in thread
             return await anyio.to_thread.run_sync(self._execute_direct, sql, parameters)
         except Exception as e:
-            raise QueryError(f"Virtual join failed (async): {e}")
+            raise QueryError(f"Virtual join failed (async): {e}") from e
         finally:
             for t in registered_tables:
                 try: self._connection._duckdb.unregister(t)
-                except: pass
+                except Exception: pass
 
     def _register_in_duckdb(self, table_name, data, registered_list):
         if "." in table_name:

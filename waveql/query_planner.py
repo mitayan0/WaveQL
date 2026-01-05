@@ -72,6 +72,10 @@ class QueryInfo:
     aggregates: List[Aggregate] = field(default_factory=list)
     raw_sql: str = ""
     is_explain: bool = False
+    # Advanced optimization fields
+    compound_predicates: List[Any] = field(default_factory=list)  # CompoundPredicate objects
+    subqueries: List[Any] = field(default_factory=list)  # SubqueryInfo objects
+    has_complex_or: bool = False  # True if query has OR predicates
 
     def __repr__(self) -> str:
         """String representation for debugging."""
@@ -172,7 +176,8 @@ class QueryPlanner:
                 info.aliases[t_alias] = t_name
             
             join_info = {
-                "type": join.args.get("kind", "INNER").upper(),
+                # Use 'or' pattern to handle None values safely
+                "type": (join.args.get("kind") or "INNER").upper(),
                 "table": t_name,
             }
             on_condition = join.args.get("on")
@@ -237,7 +242,13 @@ class QueryPlanner:
         return info
 
     def _parse_condition(self, expression: exp.Expression) -> List[Predicate]:
-        """Recursively parse WHERE clause conditions for pushdown."""
+        """Recursively parse WHERE clause conditions for pushdown.
+        
+        Enhanced to support:
+        - Simple AND conditions (always pushed down)
+        - OR conditions on same column with equality (converted to IN)
+        - Nested OR conditions with optimization
+        """
         predicates = []
         
         # Handle top-level ANDs (common for pushdown)
@@ -245,8 +256,19 @@ class QueryPlanner:
             predicates.extend(self._parse_condition(expression.left))
             predicates.extend(self._parse_condition(expression.right))
         
-        # Handle Binary Operations
-        elif isinstance(expression, (exp.EQ, exp.NEQ, exp.LT, exp.LTE, exp.GT, exp.GTE, exp.Like, exp.In)):
+        # Handle OR conditions - try to optimize to IN predicate
+        elif isinstance(expression, exp.Or):
+            or_result = self._parse_or_condition(expression)
+            if or_result:
+                predicates.append(or_result)
+            else:
+                logger.debug(
+                    "Complex OR condition detected - cannot push down, will filter client-side: %s",
+                    expression.sql()
+                )
+        
+        # Handle Binary Operations (excluding In which has different structure)
+        elif isinstance(expression, (exp.EQ, exp.NEQ, exp.LT, exp.LTE, exp.GT, exp.GTE, exp.Like)):
             col = expression.left.sql()
             
             # Map sqlglot node types to SQL operators
@@ -258,20 +280,31 @@ class QueryPlanner:
                 exp.GT: ">", 
                 exp.GTE: ">=", 
                 exp.Like: "LIKE", 
-                exp.In: "IN"
             }
             operator = op_map.get(type(expression), "=")
-            
-            # Handle list for IN
-            if isinstance(expression, exp.In):
-                if isinstance(expression.args.get("field"), exp.Tuple):
-                    val = [self._extract_literal(v) for v in expression.args["field"].expressions]
-                else:
-                    val = self._extract_literal(expression.args.get("field"))
-            else:
-                val = self._extract_literal(expression.right)
+            val = self._extract_literal(expression.right)
             
             predicates.append(Predicate(column=col, operator=operator, value=val))
+        
+        # Handle IN separately (uses 'this' for column, not 'left')
+        elif isinstance(expression, exp.In):
+            col = expression.this.sql()
+            
+            # Check for expressions (value list)
+            expressions = expression.args.get("expressions")
+            if expressions:
+                val = [self._extract_literal(v) for v in expressions]
+            elif isinstance(expression.args.get("field"), exp.Tuple):
+                val = [self._extract_literal(v) for v in expression.args["field"].expressions]
+            else:
+                # Single value or other form
+                field = expression.args.get("field")
+                if field:
+                    val = [self._extract_literal(field)]
+                else:
+                    val = []
+            
+            predicates.append(Predicate(column=col, operator="IN", value=val))
             
         # Handle IS NULL / IS NOT NULL
         elif isinstance(expression, exp.Is):
@@ -283,7 +316,90 @@ class QueryPlanner:
                 col = expression.this.left.sql()
                 predicates.append(Predicate(column=col, operator="IS NOT NULL", value=None))
         
+        # Handle parentheses
+        elif isinstance(expression, exp.Paren):
+            predicates.extend(self._parse_condition(expression.this))
+        
         return predicates
+    
+    def _parse_or_condition(self, expression: exp.Or) -> Optional[Predicate]:
+        """
+        Parse OR condition and try to convert to IN predicate.
+        
+        Converts:
+            col = 'a' OR col = 'b' OR col = 'c'
+        To:
+            col IN ('a', 'b', 'c')
+        
+        Returns None if conversion is not possible.
+        """
+        # Collect all OR branches
+        branches = self._flatten_or(expression)
+        
+        if not branches:
+            return None
+        
+        # Check if all branches are equality conditions on same column
+        column = None
+        values = []
+        
+        for branch in branches:
+            if isinstance(branch, exp.EQ):
+                col = branch.left.sql()
+                val = self._extract_literal(branch.right)
+                
+                if column is None:
+                    column = col
+                elif column != col:
+                    # Different columns - can't convert to IN
+                    return None
+                
+                values.append(val)
+            elif isinstance(branch, exp.Paren):
+                # Unwrap and check inner
+                inner = branch.this
+                if isinstance(inner, exp.EQ):
+                    col = inner.left.sql()
+                    val = self._extract_literal(inner.right)
+                    
+                    if column is None:
+                        column = col
+                    elif column != col:
+                        return None
+                    
+                    values.append(val)
+                else:
+                    return None
+            else:
+                # Non-equality condition in OR - can't optimize
+                return None
+        
+        if column and values:
+            logger.debug(
+                "Converted OR to IN: %s IN %s",
+                column, values
+            )
+            return Predicate(column=column, operator="IN", value=values)
+        
+        return None
+    
+    def _flatten_or(self, expression: exp.Or) -> List[exp.Expression]:
+        """Flatten nested OR expressions into a list of conditions."""
+        result = []
+        
+        # Process left side
+        if isinstance(expression.left, exp.Or):
+            result.extend(self._flatten_or(expression.left))
+        else:
+            result.append(expression.left)
+        
+        # Process right side
+        if isinstance(expression.right, exp.Or):
+            result.extend(self._flatten_or(expression.right))
+        else:
+            result.append(expression.right)
+        
+        return result
 
     def _extract_literal(self, expression: exp.Expression) -> Union[str, int, float, bool, None, ParameterPlaceholder]:
         """Extract a Python value from a sqlglot expression."""

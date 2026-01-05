@@ -689,7 +689,8 @@ class ServiceNowAdapter(BaseAdapter):
         for sys_id in sys_ids:
             url = f"{self._host}/api/now/table/{table_name}/{sys_id}"
             
-            async def do_update():
+            # Capture url by value using default argument to avoid closure bug
+            async def do_update(url=url):
                 response = await client.patch(url, json=values, headers=headers, timeout=self._timeout)
                 if response.status_code == 429:
                     retry_after = int(response.headers.get("Retry-After", 60))
@@ -747,7 +748,8 @@ class ServiceNowAdapter(BaseAdapter):
             for sys_id in sys_ids:
                 url = f"{self._host}/api/now/table/{table_name}/{sys_id}"
                 
-                def do_update():
+                # Capture url by value using default argument to avoid closure bug
+                def do_update(url=url):
                     response = session.patch(
                         url, json=values, headers=headers, timeout=self._timeout
                     )
@@ -806,7 +808,8 @@ class ServiceNowAdapter(BaseAdapter):
         for sys_id in sys_ids:
             url = f"{self._host}/api/now/table/{table_name}/{sys_id}"
             
-            async def do_delete():
+            # Capture url by value using default argument to avoid closure bug
+            async def do_delete(url=url):
                 response = await client.delete(url, headers=headers, timeout=self._timeout)
                 if response.status_code == 429:
                     retry_after = int(response.headers.get("Retry-After", 60))
@@ -862,7 +865,8 @@ class ServiceNowAdapter(BaseAdapter):
             for sys_id in sys_ids:
                 url = f"{self._host}/api/now/table/{table_name}/{sys_id}"
                 
-                def do_delete():
+                # Capture url by value using default argument to avoid closure bug
+                def do_delete(url=url):
                     response = session.delete(url, headers=headers, timeout=self._timeout)
                     if response.status_code == 429:
                         retry_after = int(response.headers.get("Retry-After", 60))

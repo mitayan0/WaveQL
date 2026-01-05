@@ -37,8 +37,15 @@ from waveql.auth import (
     create_auth_manager,
 )
 from waveql.cache import QueryCache, CacheConfig, CacheStats
+from waveql.optimizer import (
+    QueryOptimizer,
+    CompoundPredicate,
+    PredicateType,
+    SubqueryInfo,
+    SubqueryPushdownOptimizer,
+)
 
-__version__ = "0.1.4"
+__version__ = "0.1.5"
 __all__ = [
     "connect",
     "WaveQLConnection",
@@ -69,6 +76,12 @@ __all__ = [
     "QueryCache",
     "CacheConfig",
     "CacheStats",
+    # Optimizer
+    "QueryOptimizer",
+    "CompoundPredicate",
+    "PredicateType",
+    "SubqueryInfo",
+    "SubqueryPushdownOptimizer",
     # Async support
     "connect_async",
     "AsyncWaveQLConnection",
