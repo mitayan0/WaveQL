@@ -2,7 +2,7 @@
 """
 WaveQL Complex Predicate Demo
 
-Demonstrates the new v0.2.0 features:
+Demonstrates the new v0.1.5 features:
 1. Complex OR predicate extraction and optimization
 2. Automatic OR-to-IN conversion for pushdown
 3. Subquery analysis
