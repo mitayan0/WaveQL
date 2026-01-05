@@ -113,12 +113,38 @@ class ServiceNowCDCProvider(BaseCDCProvider):
     Uses the Table API with sysparm_query to filter by sys_updated_on.
     ServiceNow doesn't have native CDC, so we poll for changes.
     
-    For deletes, we would need to query sys_audit or maintain a local
-    cache of all keys to detect missing records.
+    Limitations
+    -----------
+    **Delete Detection**: Not supported by default. Options to detect deletes:
+    
+    1. **sys_audit Table** (Recommended): Query sys_audit for DELETE operations.
+       Requires audit role and auditing enabled on the target table.
+       
+       Example query:
+       ```
+       SELECT * FROM sys_audit 
+       WHERE tablename = 'incident' AND action = 'delete'
+       AND sys_created_on > '<last_sync>'
+       ```
+    
+    2. **Full Reconciliation**: Periodically compare all sys_ids from source
+       with local cache to detect missing records. CPU-intensive but reliable.
+    
+    3. **Soft Deletes**: For tables using 'active' flag, watch for:
+       `WHERE active = false AND sys_updated_on > '<last_sync>'`
+    
+    **Old Data**: Previous record values are not available through the Table API.
+    Use sys_audit if you need before/after comparison.
+    
+    Performance Notes
+    -----------------
+    - Poll interval should be >= 5 seconds to avoid rate limiting
+    - batch_size is capped by adapter's page_size (default 1000)
+    - Uses exponential backoff on transient failures
     """
     
     provider_name = "servicenow"
-    supports_delete_detection = False  # Would require sys_audit access
+    supports_delete_detection = False  # See docstring for options
     supports_old_data = False
     
     async def get_changes(

@@ -33,6 +33,7 @@ Built for data engineers and developers, it translates your SQL queries into opt
 
 *   **Universal Adapter System**: Connect to ServiceNow, Salesforce, Jira, or generic REST APIs with a unified interface.
 *   **Intelligent Query Pushdown**: We don't just fetch all data. `WHERE` clauses are translated into native API filters (e.g., JQL, SOQL) for maximum performance.
+*   **Query Result Caching**: Built-in LRU cache with TTL support reduces API calls and speeds up repeated queries.
 *   **Change Data Capture (CDC)**: Real-time streaming of table changes (Inserts, Updates) directly from your SaaS apps.
 *   **Cross-Source JOINs**: Seamlessly join data between your local CSVs, a Jira backlog, and ServiceNow incidents using our DuckDB-powered engine.
 *   **Async Built-in**: Built on `httpx` and `anyio` for high-concurrency, non-blocking applications.
@@ -130,6 +131,37 @@ cursor.execute("""
 
 for row in cursor:
     print(f"VIP Alert: {row.vip_name} has ticket {row.ticket}")
+```
+
+### 4. Query Caching
+
+Reduce API calls and speed up repeated queries with built-in caching:
+
+```python
+import waveql
+from waveql import CacheConfig
+
+# Simple caching with 1-minute TTL
+conn = waveql.connect("servicenow://...", cache_ttl=60)
+
+# First query hits the API
+cursor = conn.cursor()
+cursor.execute("SELECT * FROM incident WHERE active=true")
+
+# Second identical query is served from cache instantly!
+cursor.execute("SELECT * FROM incident WHERE active=true")
+
+# Check cache performance
+print(conn.cache_stats.to_dict())
+# {'hits': 1, 'misses': 1, 'hit_rate': '50.0%', 'size_mb': 0.25}
+
+# Advanced: Per-adapter TTL configuration
+config = CacheConfig(
+    default_ttl=300,
+    adapter_ttl={"servicenow": 60, "jira": 120},
+    exclude_tables=["audit_log"]
+)
+conn = waveql.connect("servicenow://...", cache_config=config)
 ```
 
 ## Supported Adapters
