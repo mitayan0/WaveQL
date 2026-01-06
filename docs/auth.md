@@ -55,6 +55,61 @@ auth = AuthManager(
 )
 ```
 
+### 4. OAuth 2.0 (Password Grant Flow)
+For Salesforce Production and Sandbox orgs.
+
+```python
+auth = AuthManager(
+    oauth_token_url="https://login.salesforce.com/services/oauth2/token",
+    oauth_client_id="consumer-key",
+    oauth_client_secret="consumer-secret",
+    username="user@example.com",
+    password="password+security_token",  # Append security token to password
+    oauth_grant_type="password",
+)
+```
+
+### 5. OAuth 2.0 (Access Token + Refresh)
+When you already have an access token (e.g., from browser-based OAuth).
+
+```python
+conn = waveql.connect(
+    "salesforce://your-instance.my.salesforce.com",
+    oauth_token="your_access_token",
+    oauth_refresh_token="your_refresh_token",  # Optional, for auto-refresh
+    oauth_token_url="https://your-instance.my.salesforce.com/services/oauth2/token",
+    oauth_client_id="consumer-key",
+)
+```
+
+This method works with **all Salesforce org types**, including Developer Edition and Trailhead Playgrounds.
+
+📖 **See [Salesforce Guide](salesforce.md) for detailed Salesforce authentication setup.**
+
+## 6. Unified Credential Provider Chain ✨ NEW
+
+For Cloud Storage (S3/GCS/Azure) and Google Sheets, WaveQL supports a unified resolution chain. This allows you to omit credentials in code and rely on environment or system configuration.
+
+**Order of Resolution:**
+1.  **Explicit Parameters**: Passed directly to `connect()` or the Adapter.
+2.  **Environment Variables**: `AWS_ACCESS_KEY_ID`, `GOOGLE_APPLICATION_CREDENTIALS`, etc.
+3.  **Config File**: `~/.waveql/credentials.yaml`.
+4.  **System Auth**: IAM Roles (AWS), Workload Identity (GCP), or default token paths.
+
+### `credentials.yaml` Example
+```yaml
+aws:
+  access_key_id: "AKIA..."
+  secret_access_key: "secret..."
+  region: "us-east-1"
+gcs:
+  project_id: "my-project"
+  service_account_json: "/path/to/creds.json"
+azure:
+  storage_account: "myaccount"
+  storage_key: "key..."
+```
+
 ## Security Best Practices
 *   **Never hardcode credentials** in your SQL scripts or Python files.
 *   Use Environment Variables (`os.getenv`) or a secrets manager.

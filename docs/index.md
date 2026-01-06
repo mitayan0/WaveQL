@@ -14,7 +14,10 @@ Complete guide to connecting and querying all supported data sources.
 *   [Salesforce](quickstart.md#salesforce) - OAuth and SOQL
 *   [REST API](quickstart.md#rest-api-generic) - Generic JSON APIs
 *   [Files](quickstart.md#files-csv-parquet-excel) - CSV, Parquet, Excel
+*   [Cloud Storage & Data Lakes](quickstart.md#cloud-storage--data-lakes) ✨ NEW - S3, GCS, Delta, Iceberg
+*   [Google Sheets](quickstart.md#google-sheets) ✨ NEW - Query spreadsheets with SQL
 *   [Cross-Source Joins](quickstart.md#cross-source-joins) - Join anything!
+*   [Streaming & Scalability](quickstart.md#streaming-large-datasets) ✨ NEW - Processing million-row datasets
 
 ## Core Concepts
 
@@ -30,6 +33,14 @@ Detailed documentation on built-in adapters and instructions for building custom
 *   [Salesforce](adapters.md#salesforce)
 *   [Jira](adapters.md#jira)
 *   [Implementing Custom Adapters](adapters.md#custom-adapters)
+
+### [Salesforce Guide](salesforce.md) ✨ NEW
+Complete guide to connecting to Salesforce.
+*   [Authentication Methods](salesforce.md#authentication-methods) - Password Flow, Access Token, OAuth
+*   [Connected App Setup](salesforce.md#setting-up-a-connected-app) - Step-by-step configuration
+*   [CRUD Operations](salesforce.md#crud-operations) - INSERT, UPDATE, DELETE
+*   [Bulk API](salesforce.md#bulk-operations) - Batch inserts for large datasets
+*   [Troubleshooting](salesforce.md#troubleshooting) - Common errors and solutions
 
 ### [Authentication](auth.md)
 Securely managing credentials and authentication flows.

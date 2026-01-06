@@ -31,11 +31,13 @@ Built for data engineers and developers, it translates your SQL queries into opt
 
 ## Why WaveQL?
 
-*   **Universal Adapter System**: Connect to ServiceNow, Salesforce, Jira, or generic REST APIs with a unified interface.
+*   **Universal Adapter System**: Connect to ServiceNow, Salesforce, Jira, Google Sheets, and Cloud Storage with a unified interface.
 *   **Intelligent Query Pushdown**: We don't just fetch all data. `WHERE` clauses are translated into native API filters (e.g., JQL, SOQL) for maximum performance.
+*   **High-Scale Streaming**: Memory-efficient RecordBatch streaming with backpressure for million-row datasets.
 *   **Query Result Caching**: Built-in LRU cache with TTL support reduces API calls and speeds up repeated queries.
 *   **Change Data Capture (CDC)**: Real-time streaming of table changes (Inserts, Updates) directly from your SaaS apps.
 *   **Cross-Source JOINs**: Seamlessly join data between your local CSVs, a Jira backlog, and ServiceNow incidents using our DuckDB-powered engine.
+*   **Data Lake Support**: Native support for **Delta Lake** and **Apache Iceberg** formats on S3, GCS, and Azure.
 *   **Async Built-in**: Built on `httpx` and `anyio` for high-concurrency, non-blocking applications.
 *   **Data Science Ready**: Native integrations with Pandas, PyArrow, and SQLAlchemy (works with Superset!).
 
@@ -168,11 +170,16 @@ conn = waveql.connect("servicenow://...", cache_config=config)
 
 | Adapter | URI Scheme | Features |
 |:--------|:-----------|:---------|
-| **ServiceNow** | `servicenow://` | Table API, **Aggregates** (SUM/COUNT/AVG), CDC, CRUD |
-| **Salesforce** | `salesforce://` | SOQL Pushdown, Bulk API support, CRUD |
-| **Jira** | `jira://` | JQL Pushdown, Pagination, CRUD |
-| **REST** | `rest://` | Generic JSON querying |
-| **File** | `file://` | CSV, Parquet, JSON (via DuckDB) |
+| **ServiceNow** | `servicenow://` | Table API, **Aggregates**, CDC, CRUD |
+| **Salesforce** | `salesforce://` | SOQL Pushdown, **Async CRUD**, Bulk API |
+| **Jira** | `jira://` | JQL Pushdown, Issues/Projects/Users, CRUD |
+| **HubSpot** | `hubspot://` | Search API v3, Contact/Company/Deal, CRUD |
+| **Shopify** | `shopify://` | Orders/Products, CRUD, Link Pagination |
+| **Zendesk** | `zendesk://` | Ticket Search, CRUD, OAuth2 |
+| **Stripe** | `stripe://` | Search/List API Switching, CRUD |
+| **SQL DB** | `postgresql://` | Full SQL Passthrough via SQLAlchemy |
+| **Cloud Storage** | `s3://`, `gs://` | Parquet/CSV, **Delta Lake**, **Iceberg** |
+| **Google Sheets** | `google_sheets://` | Spreadsheets as Tables, Read/Write |
 
 ## SQL Syntax Support
 

@@ -71,6 +71,24 @@ Standard DB-API 2.0 cursor.
 *   `fetchall().to_df()`: Converts the result set immediately to a Pandas DataFrame.
 *   `fetchall().to_arrow()`: Returns the underlying PyArrow Table.
 
+### Streaming & Scalability ✨ NEW
+*   `stream_batches(query, params=None, config=None)`: Returns a generator yielding `pyarrow.RecordBatch` objects.
+*   `stream_to_file(query, path, format='parquet', config=None)`: Streams query results directly to a file (Parquet or CSV).
+*   `stream_batches_async(query, params=None, config=None)`: Async version of `stream_batches`.
+*   `stream_to_file_async(query, path, format='parquet', config=None)`: Async version of `stream_to_file`.
+
+## `waveql.StreamConfig`
+Configuration for streaming operations.
+```python
+@dataclass
+class StreamConfig:
+    batch_size: int = 10000           # Target rows per batch
+    max_records: int = None           # Total limit (overrides SQL LIMIT)
+    progress_callback: Callable = None # progress_callback(stats: StreamStats)
+    use_buffer: bool = True           # Use async prefetch buffer
+    max_buffer_size: int = 5          # Number of batches to prefetch
+```
+
 ## `waveql.CacheConfig`
 Configuration for the query result cache.
 ```python

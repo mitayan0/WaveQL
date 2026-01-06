@@ -444,7 +444,24 @@ class OAuth2Manager(BaseAuthManager):
                 timeout=self._timeout,
                 verify=self._verify_ssl,
             )
-            response.raise_for_status()
+            
+            if not response.ok:
+                # Capture detailed error from provider
+                try:
+                    error_data = response.json()
+                    # Common OAuth2 error format
+                    error_code = error_data.get("error")
+                    error_desc = error_data.get("error_description")
+                    if error_code:
+                        error_msg = f"{error_code}: {error_desc}"
+                    else:
+                        error_msg = str(error_data)
+                except ValueError:
+                    error_msg = response.text or f"Status {response.status_code}"
+                
+                logger.error(f"OAuth2 token request failed: {error_msg}")
+                raise AuthenticationError(f"OAuth2 token request failed: {error_msg}")
+
             return self._process_token_response(response.json())
         except requests.RequestException as e:
             logger.error(f"Failed to request OAuth2 token: {e}")

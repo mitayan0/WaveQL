@@ -19,6 +19,49 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class Row:
+    """
+    A row object that supports both tuple-like indexing and dict-like key access.
+    """
+    def __init__(self, data: Dict[str, Any], schema: List[Tuple]):
+        self._data = data
+        self._schema = schema
+        self._keys = [col[0] for col in schema]
+        self._values = tuple(data[k] for k in self._keys)
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self._values[key]
+        return self._data[key]
+
+    def __iter__(self):
+        return iter(self._values)
+
+    def __len__(self):
+        return len(self._values)
+
+    def __repr__(self):
+        return f"Row({self._data})"
+
+    def keys(self):
+        return self._keys
+
+    def values(self):
+        return self._values
+
+    def items(self):
+        return self._data.items()
+
+    def as_dict(self):
+        return self._data
+
+    def __getattr__(self, name):
+        """Allow attribute-style access: row.column_name"""
+        if name in self._data:
+            return self._data[name]
+        raise AttributeError(f"'Row' object has no attribute '{name}'")
+
+
 class WaveQLCursor:
     """
     DB-API 2.0 compliant cursor with intelligent query routing.
@@ -296,7 +339,7 @@ class WaveQLCursor:
                 if not raw_data or len(raw_data) == 0:
                      self._rowcount = 0
                      return raw_data
-
+ 
                 # Register temp table
                 temp_name = f"t_{uuid.uuid4().hex}"
                 self._connection._duckdb.register(temp_name, raw_data)
@@ -354,7 +397,7 @@ class WaveQLCursor:
         
         else:
             raise QueryError(f"Unsupported operation: {query_info.operation}")
-
+ 
     def _execute_virtual_join(self, query_info, sql: str, parameters: Sequence = None) -> pa.Table:
         """
         Execute a virtual join with semi-join pushdown optimization.
@@ -365,7 +408,7 @@ class WaveQLCursor:
         registered_tables = []
         created_views = []
         dataset_cache = {} # clean_table_name -> Arrow Table
-
+ 
         try:
             # 1. Map Tables & Aliases
             # aliases: alias -> table_name
@@ -399,7 +442,7 @@ class WaveQLCursor:
                     # Ambiguous or Main Table? Assume main table if not aliased? 
                     # For safety, add to main table
                     table_predicates[query_info.table].append(pred)
-
+ 
             # 3. Execution Plan (Simple Heuristic: Tables with predicates first)
             # We want to fetch tables that reduce the dataset first.
             sorted_tables = sorted(all_tables, key=lambda t: len(table_predicates[t]), reverse=True)
@@ -512,7 +555,7 @@ class WaveQLCursor:
                      else:
                          self._connection.duckdb.register(table_name, data)
                          registered_tables.append(table_name)
-
+ 
             # 7. Execute JOIN
             step_join = self.last_plan.add_step(name="Virtual Join (DuckDB)", type="join")
             if parameters:
@@ -525,7 +568,7 @@ class WaveQLCursor:
             
             self._rowcount = -1
             return table
-
+ 
         except Exception as e:
             raise QueryError(f"Virtual join failed: {e}") from e
         finally:
@@ -576,17 +619,17 @@ class WaveQLCursor:
             for field in schema
         ]
     
-    def fetchone(self) -> Optional[Tuple]:
+    def fetchone(self) -> Optional[Row]:
         """Fetch next row of result set."""
         if self._result is None or self._result_index >= len(self._result):
             return None
         
-        row = self._result.slice(self._result_index, 1).to_pydict()
+        row_dict = self._result.slice(self._result_index, 1).to_pylist()[0]
         self._result_index += 1
         
-        return tuple(v[0] for v in row.values())
+        return Row(row_dict, self._description)
     
-    def fetchmany(self, size: int = None) -> List[Tuple]:
+    def fetchmany(self, size: int = None) -> List[Row]:
         """Fetch next set of rows."""
         if size is None:
             size = self._arraysize
@@ -600,15 +643,19 @@ class WaveQLCursor:
         
         return rows
     
-    def fetchall(self) -> List[Tuple]:
+    def fetchall(self) -> List[Row]:
         """Fetch all remaining rows."""
         if self._result is None:
             return []
         
-        remaining = self._result.slice(self._result_index)
-        self._result_index = len(self._result)
+        results = []
+        while True:
+            row = self.fetchone()
+            if row is None:
+                break
+            results.append(row)
         
-        return [tuple(row.values()) for row in remaining.to_pylist()]
+        return results
     
     def to_arrow(self) -> Optional[pa.Table]:
         """Return result as Arrow Table (extension method)."""
@@ -619,6 +666,118 @@ class WaveQLCursor:
         if self._result is None:
             return None
         return self._result.to_pandas()
+    
+    def stream_batches(
+        self,
+        operation: str,
+        batch_size: int = 1000,
+        max_records: int = None,
+        progress_callback = None,
+    ):
+        """
+        Stream query results as RecordBatches for memory-efficient processing.
+        
+        This method yields Arrow RecordBatches one at a time, enabling:
+        - Processing of million-row exports without loading into memory
+        - Progress tracking for long-running queries
+        - Early termination (just stop iterating)
+        
+        Args:
+            operation: SQL SELECT query
+            batch_size: Number of records per batch (default 1000)
+            max_records: Maximum total records to fetch (None = unlimited)
+            progress_callback: Function(records_fetched, total_estimate) for progress
+            
+        Yields:
+            pa.RecordBatch objects
+            
+        Example:
+            for batch in cursor.stream_batches("SELECT * FROM large_table"):
+                for row in batch.to_pylist():
+                    process(row)
+        """
+        from waveql.streaming import RecordBatchStream, StreamConfig
+        
+        if self._closed:
+            raise QueryError("Cursor is closed")
+        
+        # Parse query to get table and predicates
+        query_info = self._planner.parse(operation)
+        
+        if query_info.operation != "SELECT":
+            raise QueryError("stream_batches() only supports SELECT queries")
+        
+        # Resolve adapter
+        adapter = self._resolve_adapter(query_info)
+        if not adapter:
+            raise QueryError("stream_batches() requires an adapter-backed table")
+        
+        clean_table = self._clean_table_name(query_info.table)
+        
+        config = StreamConfig(
+            batch_size=batch_size,
+            max_records=max_records,
+            progress_callback=progress_callback,
+        )
+        
+        stream = RecordBatchStream(
+            adapter=adapter,
+            table=clean_table,
+            columns=query_info.columns if query_info.columns != ["*"] else None,
+            predicates=query_info.predicates,
+            order_by=query_info.order_by,
+            config=config,
+        )
+        
+        return stream
+    
+    def stream_to_file(
+        self,
+        operation: str,
+        output_path: str,
+        batch_size: int = 1000,
+        compression: str = "snappy",
+        progress_callback = None,
+    ):
+        """
+        Stream query results directly to a Parquet file without loading into memory.
+        
+        This is the most memory-efficient way to export large datasets.
+        
+        Args:
+            operation: SQL SELECT query
+            output_path: Path to output Parquet file
+            batch_size: Number of records per batch (default 1000)
+            compression: Parquet compression ('snappy', 'gzip', 'zstd', 'none')
+            progress_callback: Function(records_fetched, total_estimate) for progress
+            
+        Returns:
+            StreamStats with operation statistics
+            
+        Example:
+            stats = cursor.stream_to_file(
+                "SELECT * FROM large_table",
+                "export.parquet",
+                progress_callback=lambda n, t: print(f"Exported {n:,} records")
+            )
+            print(f"Total: {stats.records_fetched:,} records")
+        """
+        from waveql.streaming import StreamConfig
+        
+        config = StreamConfig(
+            batch_size=batch_size,
+            compression=compression,
+            progress_callback=progress_callback,
+        )
+        
+        stream = self.stream_batches(
+            operation,
+            batch_size=batch_size,
+            progress_callback=progress_callback,
+        )
+        stream._config.compression = compression
+        
+        return stream.to_parquet(output_path)
     
     def close(self):
         """Close the cursor."""
@@ -646,4 +805,3 @@ class WaveQLCursor:
         status = "closed" if self._closed else "open"
         result_len = len(self._result) if self._result is not None else 0
         return f"<WaveQLCursor status={status} rows={result_len} position={self._result_index}>"
-

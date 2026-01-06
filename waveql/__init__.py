@@ -52,6 +52,14 @@ from waveql.optimizer import (
     SubqueryInfo,
     SubqueryPushdownOptimizer,
 )
+from waveql.streaming import (
+    RecordBatchStream,
+    AsyncRecordBatchStream,
+    BufferedAsyncStream,
+    StreamConfig,
+    StreamStats,
+    create_stream,
+)
 
 __version__ = "0.1.6"
 __all__ = [
@@ -101,6 +109,13 @@ __all__ = [
     "connect_async",
     "AsyncWaveQLConnection",
     "AsyncWaveQLCursor",
+    # Streaming
+    "RecordBatchStream",
+    "AsyncRecordBatchStream",
+    "BufferedAsyncStream",
+    "StreamConfig",
+    "StreamStats",
+    "create_stream",
     # DB-API 2.0 globals
     "apilevel",
     "threadsafety",

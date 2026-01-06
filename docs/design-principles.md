@@ -328,6 +328,60 @@ class ColumnSchema(BaseModel):
 
 ---
 
+## 11. Streaming for Scale
+
+**Principle:** *Process any data size without memory exhaustion.*
+
+Large exports or analysis shouldn't require loading entire datasets into memory. WaveQL provides generator-based streaming with backpressure as a core primitive:
+
+- **`stream_batches()`** - yields RecordBatches page-by-page as they arrive from the source.
+- **`stream_to_file()`** - direct-to-Parquet export that pipes data directly to disk.
+- **`BufferedAsyncStream`** - prefetching batches in the background while the consumer processes the current one.
+
+### Implementation Pattern
+
+```python
+# Process millions of rows with 10MB memory usage
+async for batch in cursor.stream_batches_async("SELECT * FROM large_table"):
+    process_batch(batch) # Arrow zero-copy processing
+```
+
+---
+
+## 12. Cloud-Native & Data Lakes
+
+**Principle:** *Data lives everywhere. Access it where it is.*
+
+WaveQL bridges the gap between SaaS APIs and modern data lakes. By leveraging DuckDB extension ecosystem, we treat object storage as a first-class data source:
+
+- **S3, GCS, Azure Blob** - native httpfs support with predicate pushdown.
+- **Delta Lake** - version-aware queries using the Delta Log.
+- **Apache Iceberg** - standardized metadata-driven access.
+
+---
+
+## 13. Unified Authentication & Credential Chain
+
+**Principle:** *Security should be robust yet effortless.*
+
+Adapters shouldn't care where credentials come from. We implement a unified resolution chain for all cloud and API authentication:
+
+- **Order of Resolution:** Explicit params → Environment variables → Config files (`credentials.yaml`) → IAM roles/Workload Identity.
+- **Dynamic Refresh:** All tokens are auto-refreshed via the `AuthManager` before expiration.
+
+---
+
+## 14. Change Data Capture (CDC)
+
+**Principle:** *Don't pull history when you only need updates.*
+
+WaveQL moves beyond snapshots with a standard pattern for real-time data integration:
+
+- **`stream_changes()`** - an async iterator that abstracts away polling and timestamp tracking.
+- **State Persistence** - markers are managed to ensure "exactly-once" style delivery where possible.
+
+---
+
 ## Summary
 
 | Principle | One-liner |
@@ -342,6 +396,10 @@ class ColumnSchema(BaseModel):
 | Graceful Degradation | Fail with actionable messages |
 | Cache First-Class | Repeated queries should be instant |
 | Pydantic Validation | Type-safe, IDE-friendly contracts |
+| Streaming for Scale | Process millions of rows with MBs of RAM |
+| Cloud-Native | Direct access to S3/GCS/Delta/Iceberg |
+| Unified Auth | Seamless credential provider chain |
+| CDC Pattern | Real-time updates over full snapshots |
 
 ---
 

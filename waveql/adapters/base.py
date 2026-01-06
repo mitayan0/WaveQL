@@ -361,6 +361,36 @@ class BaseAdapter(ABC):
             return await self._auth_manager.get_headers_async()
         return {}
     
+    def _extract_id_from_predicates(self, predicates: List["Predicate"], operation: str) -> str:
+        """
+        Helper to extract 'id' from predicates.
+        
+        Args:
+            predicates: List of predicates
+            operation: Name of operation for error message
+            
+        Returns:
+            The extracted ID string
+            
+        Raises:
+            QueryError: If ID is not found or invalid
+        """
+        from waveql.exceptions import QueryError
+        
+        if not predicates:
+            raise QueryError(f"{operation} requires 'id' in WHERE clause (e.g., WHERE id = '123')")
+            
+        object_id = None
+        for pred in predicates:
+            if pred.column.lower() == "id" and pred.operator == "=":
+                object_id = pred.value
+                break
+                
+        if not object_id:
+            raise QueryError(f"{operation} requires 'id' in WHERE clause")
+            
+        return str(object_id)
+
     def _request_with_retry(self, request_func, *args, **kwargs) -> Any:
         """
         Execute an HTTP request with automatic retry on rate limits.

@@ -11,6 +11,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Streaming & Scalability**
+  - New `cursor.stream_batches()` and `cursor.stream_batches_async()` for memory-efficient processing of large result sets
+  - New `cursor.stream_to_file()` and `cursor.stream_to_file_async()` for direct-to-Parquet exports
+  - New `BufferedAsyncStream` with prefetching and backpressure support for maximum throughput
+  - Configurable batch sizes and progress tracking via `StreamConfig` and `StreamStats`
+
+- **Cloud Storage & Data Lakes**
+  - New `CloudStorageAdapter` supporting S3, GCS, and Azure Blob storage via DuckDB
+  - Native support for **Delta Lake** and **Apache Iceberg** table formats
+  - Automatic provider detection from URIs (s3://, gs://, azure://)
+  - Factory functions for easy setup: `s3_adapter()`, `gcs_adapter()`, `azure_adapter()`, `delta_table()`, `iceberg_table()`
+
+- **Google Sheets Adapter**
+  - New `GoogleSheetsAdapter` for querying spreadsheets using standard SQL
+  - Support for multiple sheets (tabs) as tables
+  - Automatic type inference from spreadsheet data
+  - Support for Service Account and OAuth2 authentication
+
+- **Credential Provider Chain**
+  - Unified credential resolution: Explicit parameters → Environment variables → Config file (`~/.waveql/credentials.yaml`) → IAM roles
+  - New `CloudCredentials` and `GoogleSheetsCredentials` models
+
+- **Salesforce Async CRUD**
+  - Full async support for Salesforce adapter (`fetch_async`, `insert_async`, `update_async`, `delete_async`)
+  - Async schema discovery with `get_schema_async`
+
 - **Data Contracts** (Pydantic-based Schema Validation)
   - New `DataContract` model for defining table schemas with type safety
   - New `ColumnContract` model for column-level definitions

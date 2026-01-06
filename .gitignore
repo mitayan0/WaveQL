@@ -164,3 +164,4 @@ credentials.json
 .env.local
 .env.production
 .agent/
+playground/

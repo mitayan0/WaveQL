@@ -24,7 +24,7 @@ class TestJiraAdapter:
         """Test fetching issues."""
         responses.add(
             responses.POST,
-            "https://test.atlassian.net/rest/api/3/search",
+            "https://test.atlassian.net/rest/api/3/search/jql",
             json={
                 "issues": [
                     {
@@ -83,7 +83,7 @@ class TestJiraAdapter:
         
         responses.add_callback(
             responses.POST,
-            "https://test.atlassian.net/rest/api/3/search",
+            "https://test.atlassian.net/rest/api/3/search/jql",
             callback=request_callback,
             content_type="application/json",
         )
@@ -112,7 +112,7 @@ class TestJiraAdapter:
         
         responses.add_callback(
             responses.POST,
-            "https://test.atlassian.net/rest/api/3/search",
+            "https://test.atlassian.net/rest/api/3/search/jql",
             callback=request_callback,
             content_type="application/json",
         )
@@ -138,7 +138,7 @@ class TestJiraAdapter:
         
         responses.add_callback(
             responses.POST,
-            "https://test.atlassian.net/rest/api/3/search",
+            "https://test.atlassian.net/rest/api/3/search/jql",
             callback=request_callback,
             content_type="application/json",
         )
@@ -154,7 +154,7 @@ class TestJiraAdapter:
         """Test limit handling."""
         responses.add(
             responses.POST,
-            "https://test.atlassian.net/rest/api/3/search",
+            "https://test.atlassian.net/rest/api/3/search/jql",
             json={
                 "issues": [
                     {"id": "1", "key": "PROJ-1", "fields": {"summary": "Issue 1"}},
@@ -184,7 +184,7 @@ class TestJiraAdapter:
         
         responses.add_callback(
             responses.POST,
-            "https://test.atlassian.net/rest/api/3/search",
+            "https://test.atlassian.net/rest/api/3/search/jql",
             callback=request_callback,
             content_type="application/json",
         )
@@ -275,26 +275,25 @@ class TestJiraAdapter:
     @responses.activate
     def test_pagination(self, adapter):
         """Test pagination handling."""
-        # First page
+        # First page - new API uses nextPageToken
         responses.add(
             responses.POST,
-            "https://test.atlassian.net/rest/api/3/search",
+            "https://test.atlassian.net/rest/api/3/search/jql",
             json={
                 "issues": [{"id": str(i), "key": f"PROJ-{i}", "fields": {}} for i in range(1, 101)],
                 "total": 150,
-                "startAt": 0,
+                "nextPageToken": "page2token",
             },
             status=200,
         )
         
-        # Second page
+        # Second page - no nextPageToken means last page
         responses.add(
             responses.POST,
-            "https://test.atlassian.net/rest/api/3/search",
+            "https://test.atlassian.net/rest/api/3/search/jql",
             json={
                 "issues": [{"id": str(i), "key": f"PROJ-{i}", "fields": {}} for i in range(101, 151)],
                 "total": 150,
-                "startAt": 100,
             },
             status=200,
         )

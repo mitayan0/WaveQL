@@ -1,6 +1,7 @@
 
 import pytest
 import responses
+from responses import matchers
 import pyarrow as pa
 from waveql.adapters.rest_adapter import RESTAdapter
 from waveql.query_planner import Predicate
@@ -50,10 +51,10 @@ def test_fetch_users_with_filter(mock_rest_adapter):
     # Expect query params in URL
     responses.add(
         responses.GET,
-        "https://api.example.com/users?role=admin",
+        "https://api.example.com/users",
         json=users_data,
         status=200,
-        match_querystring=True
+        match=[matchers.query_string_matcher("role=admin")]
     )
     
     predicates = [Predicate("role", "=", "admin")]
@@ -69,10 +70,10 @@ def test_fetch_users_limit_offset(mock_rest_adapter):
     
     responses.add(
         responses.GET,
-        "https://api.example.com/users?limit=1&offset=2",
+        "https://api.example.com/users",
         json=users_data,
         status=200,
-        match_querystring=True
+        match=[matchers.query_string_matcher("limit=1&offset=2")]
     )
     
     table = mock_rest_adapter.fetch("users", limit=1, offset=2)
