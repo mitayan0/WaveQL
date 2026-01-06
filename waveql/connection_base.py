@@ -115,6 +115,13 @@ class ConnectionMixin:
         """
         from waveql.auth.manager import AuthManager
         
+        # Extract known OAuth params to avoid duplicate keyword arguments
+        known_oauth_keys = {
+            "oauth_token_url", "oauth_client_id", "oauth_client_secret",
+            "oauth_grant_type", "oauth_refresh_token", "oauth_scope"
+        }
+        extra_params = {k: v for k, v in oauth_params.items() if k not in known_oauth_keys}
+        
         return AuthManager(
             username=username,
             password=password,
@@ -126,5 +133,6 @@ class ConnectionMixin:
             oauth_grant_type=oauth_params.get("oauth_grant_type", "client_credentials"),
             oauth_refresh_token=oauth_params.get("oauth_refresh_token"),
             oauth_scope=oauth_params.get("oauth_scope"),
-            **oauth_params
+            **extra_params
         )
+

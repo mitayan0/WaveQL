@@ -220,25 +220,40 @@ WaveQL automatically translates SQL `WHERE` clauses to JQL:
 
 ### Connection
 
+WaveQL supports two authentication methods for Salesforce:
+
+**Method 1: Password Flow (Production/Sandbox orgs)**
 ```python
-# Username + Password + Security Token
+# Password + Security Token
 conn = waveql.connect(
-    "salesforce://user@company.com:password+security_token@login.salesforce.com"
-)
-
-# OAuth (recommended for production)
-conn = waveql.connect(
-    "salesforce://myorg.my.salesforce.com",
-    oauth_client_id="your_connected_app_id",
-    oauth_client_secret="your_connected_app_secret",
-    oauth_token_url="https://login.salesforce.com/services/oauth2/token"
-)
-
-# With API version
-conn = waveql.connect(
-    "salesforce://myorg.my.salesforce.com?api_version=v58.0"
+    "salesforce://your-instance.my.salesforce.com",
+    username="user@company.com",
+    password="yourpassword" + "security_token",  # Concatenate password + token
+    oauth_token_url="https://login.salesforce.com/services/oauth2/token",
+    oauth_client_id="your_consumer_key",
+    oauth_client_secret="your_consumer_secret",
+    oauth_grant_type="password",
 )
 ```
+
+**Method 2: Access Token (All org types, including Dev/Trailhead)**
+```python
+# Pre-obtained access token
+conn = waveql.connect(
+    "salesforce://your-instance.my.salesforce.com",
+    oauth_token="your_access_token",
+    oauth_refresh_token="your_refresh_token",  # Optional, for auto-refresh
+    oauth_token_url="https://your-instance.my.salesforce.com/services/oauth2/token",
+    oauth_client_id="your_consumer_key",
+)
+```
+
+**Getting tokens for Method 2:**
+Run the included OAuth helper script:
+```bash
+python playground/salesforce_oauth_setup.py
+```
+This opens a browser for you to log in and captures the tokens automatically.
 
 ### Query Examples
 
@@ -253,24 +268,37 @@ cursor.execute("""
     LIMIT 100
 """)
 
-# Relationship queries (SOQL style)
-cursor.execute("""
-    SELECT Id, Name, Account.Name AS AccountName
-    FROM Contact
-    WHERE Account.Industry = 'Finance'
-""")
-
 # Aggregations
 cursor.execute("""
-    SELECT Industry, COUNT(Id) as count 
+    SELECT Industry, COUNT(Id) cnt 
     FROM Account 
     GROUP BY Industry
 """)
+
+# CRUD Operations
+cursor.execute("INSERT INTO Account (Name, Industry) VALUES ('ACME', 'Tech')")
+cursor.execute("UPDATE Account SET Industry = 'Finance' WHERE Id = '001xxx'")
+cursor.execute("DELETE FROM Account WHERE Id = '001xxx'")
+```
+
+### Bulk Insert
+
+For large batch inserts:
+```python
+adapter = conn._get_adapter()
+records = [
+    {"Name": "Account 1", "Industry": "Technology"},
+    {"Name": "Account 2", "Industry": "Finance"},
+]
+result = adapter.insert_bulk("Account", records)
+print(f"Processed: {result['numberRecordsProcessed']}")
 ```
 
 ### Supported Objects
 
 All Salesforce standard and custom objects: `Account`, `Contact`, `Opportunity`, `Lead`, `Case`, `CustomObject__c`, etc.
+
+📖 **See [Salesforce Guide](salesforce.md) for complete setup instructions and troubleshooting.**
 
 ---
 
@@ -395,6 +423,124 @@ cursor.execute("SELECT * FROM 'data/*.parquet'")  # Glob patterns work!
 
 # Query Excel
 cursor.execute("SELECT * FROM 'report.xlsx'")
+```
+
+---
+
+---
+
+## Cloud Storage & Data Lakes ✨ NEW
+
+Query files directly from S3, GCS, or Azure Blob Storage, including Data Lake formats like Delta Lake and Iceberg.
+
+### Connection
+
+```python
+# S3 Parquet Files
+conn = waveql.connect("s3://my-bucket/data/")
+
+# Azure Blob Storage
+conn = waveql.connect("azure://container@account.blob.core.windows.net/path/")
+
+# Delta Lake Table
+conn = waveql.connect("s3://my-bucket/delta-table/", format="delta")
+
+# Iceberg Table
+conn = waveql.connect("s3://my-bucket/iceberg/", format="iceberg", iceberg_catalog="glue")
+```
+
+### Factory Functions (Simplified)
+
+```python
+from waveql.adapters import s3_adapter, gcs_adapter, delta_table, iceberg_table
+
+# S3 with specific credentials
+adapter = s3_adapter(
+    bucket="my-bucket",
+    prefix="logs/",
+    access_key="AKIA...",
+    secret_key="secret..."
+)
+
+# Delta Lake table
+adapter = delta_table("s3://bucket/delta-table/")
+```
+
+### Authentication (Credential Chain)
+
+WaveQL automatically looks for credentials in:
+1. `connect()` parameters
+2. Environment variables (`AWS_ACCESS_KEY_ID`, `GOOGLE_APPLICATION_CREDENTIALS`, etc.)
+3. Config file `~/.waveql/credentials.yaml`
+4. IAM Roles / Workload Identity (Automatic)
+
+---
+
+## Google Sheets ✨ NEW
+
+Query any Google Spreadsheet using SQL. Each tab (sheet) in the file is treated as a table.
+
+### Connection
+
+```python
+# Connect via Spreadsheet ID
+conn = waveql.connect(
+    "google_sheets://1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms",
+    service_account_json="path/to/creds.json"
+)
+
+# Connect via full URL
+conn = waveql.connect("https://docs.google.com/spreadsheets/d/1BxiMVs...")
+```
+
+### Querying
+
+```python
+cursor = conn.cursor()
+
+# Query Sheet1
+cursor.execute("SELECT Name, Email FROM Sheet1 WHERE Status = 'Active'")
+
+# Append a row
+cursor.execute("""
+    INSERT INTO Sheet1 (Name, Email, Status) 
+    VALUES ('Jane Smith', 'jane@example.com', 'Pending')
+""")
+```
+
+---
+
+## Streaming Large Datasets ✨ NEW
+
+For million-row result sets that exceed available memory, use WaveQL's streaming API.
+
+### 1. Batch Streaming (Arrow)
+
+Yields data in `pyarrow.RecordBatch` chunks as they arrive from the source.
+
+```python
+# Sync streaming
+cursor.execute("SELECT * FROM large_table")
+for batch in cursor.stream_batches():
+    print(f"Processing batch of {batch.num_rows} rows")
+    process(batch)
+
+# Async streaming with prefetching and backpressure
+async for batch in cursor.stream_batches_async("SELECT * FROM large_table"):
+    await process_async(batch)
+```
+
+### 2. Direct-to-File Export
+
+Stream results directly to disk without ever loading more than one batch into memory.
+
+```python
+# Export 10M rows from Salesforce to Parquet
+cursor.stream_to_file(
+    "SELECT * FROM Opportunity",
+    output_path="opportunities_export.parquet",
+    format="parquet"
+)
 ```
 
 ---

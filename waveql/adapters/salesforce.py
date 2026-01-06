@@ -6,6 +6,7 @@ from __future__ import annotations
 import urllib.parse
 from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 import requests
+import httpx
 import pyarrow as pa
 
 from waveql.adapters.base import BaseAdapter
@@ -137,6 +138,213 @@ class SalesforceAdapter(BaseAdapter):
         # Infer/Use schema from results or cache
         schema = self.get_schema(table)
         return self._to_arrow(records, schema, select_fields)
+
+    async def fetch_async(
+        self,
+        table: str,
+        columns: List[str] = None,
+        predicates: List["Predicate"] = None,
+        limit: int = None,
+        offset: int = None,
+        order_by: List[tuple] = None,
+        group_by: List[str] = None,
+        aggregates: List[Any] = None,
+    ) -> pa.Table:
+        """Fetch data using SOQL (async)."""
+        is_aggregation = bool(aggregates or group_by)
+        
+        # 1. Resolve Select Fields
+        if is_aggregation:
+            select_fields = []
+            if group_by:
+                select_fields.extend(group_by)
+            if aggregates:
+                for agg in aggregates:
+                    expr = f"{agg.func}({agg.column})"
+                    if agg.alias:
+                        expr += f" {agg.alias}"
+                    select_fields.append(expr)
+            if not select_fields:
+                select_fields = ["Id"] 
+        else:
+            if not columns or columns == ["*"]:
+                schema = await self.get_schema_async(table)
+                select_fields = [col.name for col in schema]
+            else:
+                select_fields = columns
+            
+        # 2. Build SOQL Query
+        soql = f"SELECT {', '.join(select_fields)} FROM {table}"
+        
+        # Add WHERE clause
+        if predicates:
+            where_clauses = []
+            for pred in predicates:
+                clause = self._predicate_to_soql(pred)
+                if clause:
+                    where_clauses.append(clause)
+            
+            if where_clauses:
+                soql += " WHERE " + " AND ".join(where_clauses)
+        
+        # Add GROUP BY
+        if group_by:
+            soql += " GROUP BY " + ", ".join(group_by)
+        
+        # Add ORDER BY
+        if order_by:
+            sort_expressions = []
+            for col, direction in order_by:
+                sort_expressions.append(f"{col} {direction}")
+            soql += " ORDER BY " + ", ".join(sort_expressions)
+            
+        # Add LIMIT/OFFSET
+        if limit:
+            soql += f" LIMIT {limit}"
+        if offset:
+            soql += f" OFFSET {offset}"
+            
+        # 3. Execute Query (async)
+        records = await self._execute_soql_async(soql)
+        
+        # 4. Convert to Arrow
+        if is_aggregation:
+            schema = await self._build_aggregate_schema_async(table, group_by, aggregates)
+            return self._to_arrow(records, schema)
+        
+        if not records:
+            schema = await self.get_schema_async(table)
+            return self._to_arrow([], schema, select_fields)
+
+        schema = await self.get_schema_async(table)
+        return self._to_arrow(records, schema, select_fields)
+
+    async def _execute_soql_async(self, soql: str) -> List[Dict]:
+        """Execute SOQL query and handle pagination (async)."""
+        url = f"{self._host}/services/data/{self._api_version}/query"
+        params = {"q": soql}
+        all_records = []
+        
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            **await self._get_auth_headers_async()
+        }
+        
+        client = self._get_async_client()
+        
+        while True:
+            if params:
+                response = await client.get(url, params=params, headers=headers, timeout=self._timeout)
+            else:
+                response = await client.get(url, headers=headers, timeout=self._timeout)
+            
+            if response.status_code == 429:
+                raise RateLimitError("Salesforce rate limit exceeded")
+            
+            if not response.is_success:
+                try:
+                    err_body = response.json()
+                    if isinstance(err_body, list) and len(err_body) > 0:
+                        msg = err_body[0].get("message", response.text)
+                        raise AdapterError(f"Salesforce error: {msg}")
+                except ValueError:
+                    pass
+                response.raise_for_status()
+            
+            data = response.json()
+            all_records.extend(data.get("records", []))
+            
+            # Check for next page
+            if not data.get("done") and data.get("nextRecordsUrl"):
+                next_url = data["nextRecordsUrl"]
+                url = f"{self._host}{next_url}"
+                params = None
+            else:
+                break
+                
+        return all_records
+
+    async def get_schema_async(self, table: str) -> List[ColumnInfo]:
+        """Discover schema via SObject Describe (async)."""
+        cached = self._get_cached_schema(table)
+        if cached:
+            return cached
+            
+        url = f"{self._host}/services/data/{self._api_version}/sobjects/{table}/describe"
+        
+        headers = {
+            "Accept": "application/json",
+            **await self._get_auth_headers_async()
+        }
+        
+        client = self._get_async_client()
+        response = await client.get(url, headers=headers, timeout=self._timeout)
+        
+        if not response.is_success:
+            response.raise_for_status()
+        
+        data = response.json()
+        
+        columns = []
+        for field in data.get("fields", []):
+            col_name = field["name"]
+            sf_type = field["type"]
+            
+            # Map Salesforce types to generic types
+            if sf_type in ("boolean",):
+                dtype = "boolean"
+            elif sf_type in ("int", "integer"):
+                dtype = "integer"
+            elif sf_type in ("double", "percent", "currency"):
+                dtype = "float"
+            elif sf_type in ("date", "datetime"):
+                dtype = "timestamp"
+            else:
+                dtype = "string"
+                
+            columns.append(ColumnInfo(name=col_name, data_type=dtype, nullable=field["nillable"]))
+            
+        self._cache_schema(table, columns)
+        return columns
+
+    async def _build_aggregate_schema_async(self, table: str, group_by: List[str], aggregates: List[Any]) -> List[ColumnInfo]:
+        """Build schema for aggregation result (async)."""
+        base_schema = {c.name: c for c in await self.get_schema_async(table)}
+        result_schema = []
+        
+        # 1. Group By Columns
+        if group_by:
+            for col_name in group_by:
+                col_info = base_schema.get(col_name)
+                if not col_info:
+                    result_schema.append(ColumnInfo(col_name, "string"))
+                else:
+                    result_schema.append(col_info)
+                    
+        # 2. Aggregates
+        if aggregates:
+            expr_index = 0
+            for agg in aggregates:
+                if agg.alias:
+                    name = agg.alias
+                else:
+                    name = f"expr{expr_index}"
+                    expr_index += 1
+                
+                dtype = "string"
+                func = agg.func.upper()
+                if func == "COUNT":
+                    dtype = "integer"
+                elif func in ("SUM", "AVG"):
+                    dtype = "float"
+                else:
+                    orig = base_schema.get(agg.column)
+                    dtype = orig.data_type if orig else "string"
+                    
+                result_schema.append(ColumnInfo(name, dtype))
+                
+        return result_schema
 
     def _build_aggregate_schema(self, table: str, group_by: List[str], aggregates: List[Any]) -> List[ColumnInfo]:
         """Build schema for aggregation result."""
@@ -299,6 +507,74 @@ class SalesforceAdapter(BaseAdapter):
         url = f"{self._host}/services/data/{self._api_version}/sobjects/{table}/{record_id}"
         self._request("DELETE", url)
         return 1
+
+    async def insert_async(self, table: str, values: Dict[str, Any], parameters: Sequence = None) -> int:
+        """Insert object (async)."""
+        url = f"{self._host}/services/data/{self._api_version}/sobjects/{table}"
+        await self._request_async("POST", url, json=values)
+        return 1
+
+    async def update_async(self, table: str, values: Dict[str, Any], predicates: List["Predicate"] = None, parameters: Sequence = None) -> int:
+        """Update object (requires ID) (async)."""
+        record_id = self._extract_id(predicates)
+        if not record_id:
+             raise QueryError("UPDATE requires 'Id' in WHERE clause")
+             
+        url = f"{self._host}/services/data/{self._api_version}/sobjects/{table}/{record_id}"
+        await self._request_async("PATCH", url, json=values)
+        return 1
+
+    async def delete_async(self, table: str, predicates: List["Predicate"] = None, parameters: Sequence = None) -> int:
+        """Delete object (requires ID) (async)."""
+        record_id = self._extract_id(predicates)
+        if not record_id:
+             raise QueryError("DELETE requires 'Id' in WHERE clause")
+             
+        url = f"{self._host}/services/data/{self._api_version}/sobjects/{table}/{record_id}"
+        await self._request_async("DELETE", url)
+        return 1
+
+    async def _request_async(self, method: str, url: str, **kwargs) -> Any:
+        """Perform authenticated request with rate limit handling (async)."""
+        headers = kwargs.pop("headers", {})
+        request_headers = {
+             "Accept": "application/json",
+             "Content-Type": "application/json",
+             **await self._get_auth_headers_async()
+        }
+        request_headers.update(headers)
+        
+        client = self._get_async_client()
+        
+        if method == "GET":
+            response = await client.get(url, headers=request_headers, timeout=self._timeout, **kwargs)
+        elif method == "POST":
+            response = await client.post(url, headers=request_headers, timeout=self._timeout, **kwargs)
+        elif method == "PATCH":
+            response = await client.patch(url, headers=request_headers, timeout=self._timeout, **kwargs)
+        elif method == "PUT":
+            response = await client.put(url, headers=request_headers, timeout=self._timeout, **kwargs)
+        elif method == "DELETE":
+            response = await client.delete(url, headers=request_headers, timeout=self._timeout, **kwargs)
+        else:
+            raise ValueError(f"Unsupported HTTP method: {method}")
+        
+        if response.status_code == 429:
+            raise RateLimitError("Salesforce rate limit exceeded")
+        
+        if not response.is_success:
+            try:
+                err_body = response.json()
+                if isinstance(err_body, list) and len(err_body) > 0:
+                    msg = err_body[0].get("message", response.text)
+                    raise AdapterError(f"Salesforce error: {msg}")
+            except ValueError:
+                pass
+            response.raise_for_status()
+        
+        if response.status_code in (201, 204):
+            return None
+        return response.json()
         
     def _extract_id(self, predicates: List["Predicate"]) -> Optional[str]:
         """Extract 'Id' from predicates."""
@@ -353,12 +629,13 @@ class SalesforceAdapter(BaseAdapter):
         import csv
         import time
         
-        # 1. Create Job
+        # 1. Create Job - specify CRLF for Windows compatibility
         url = f"{self._host}/services/data/{self._api_version}/jobs/ingest/"
         job_data = {
             "object": table,
             "contentType": "CSV",
-            "operation": "insert"
+            "operation": "insert",
+            "lineEnding": "CRLF"  # Use CRLF for cross-platform compatibility
         }
         job = self._request("POST", url, json=job_data)
         job_id = job["id"]
@@ -368,8 +645,8 @@ class SalesforceAdapter(BaseAdapter):
             if not records:
                 return {"status": "Aborted", "numberRecordsProcessed": 0, "id": job_id}
                 
-            csv_buffer = io.StringIO()
-            writer = csv.DictWriter(csv_buffer, fieldnames=records[0].keys())
+            csv_buffer = io.StringIO(newline='')  # Let csv module handle line endings
+            writer = csv.DictWriter(csv_buffer, fieldnames=records[0].keys(), lineterminator='\r\n')
             writer.writeheader()
             writer.writerows(records)
             csv_content = csv_buffer.getvalue()

@@ -287,6 +287,122 @@ class AsyncWaveQLCursor:
             return None
         return self._result.to_pandas()
 
+    def stream_batches_async(
+        self,
+        operation: str,
+        batch_size: int = 1000,
+        max_records: int = None,
+        progress_callback = None,
+        use_buffer: bool = False,
+    ):
+        """
+        Stream query results as RecordBatches for memory-efficient async processing.
+        
+        This method returns an async iterator that yields Arrow RecordBatches
+        one at a time with proper backpressure support, enabling:
+        - Processing of million-row exports without loading into memory
+        - Concurrent prefetching for maximum throughput (use_buffer=True)
+        - Progress tracking for long-running queries
+        - Early termination (just stop iterating)
+        
+        Args:
+            operation: SQL SELECT query
+            batch_size: Number of records per batch (default 1000)
+            max_records: Maximum total records to fetch (None = unlimited)
+            progress_callback: Function(records_fetched, total_estimate) for progress
+            use_buffer: If True, use buffered prefetching for better throughput
+            
+        Returns:
+            AsyncIterator[pa.RecordBatch]
+            
+        Example:
+            async for batch in cursor.stream_batches_async("SELECT * FROM large_table"):
+                for row in batch.to_pylist():
+                    await process_async(row)
+        """
+        from waveql.streaming import AsyncRecordBatchStream, BufferedAsyncStream, StreamConfig
+        
+        if self._closed:
+            raise QueryError("Cursor is closed")
+        
+        # Parse query to get table and predicates
+        query_info = self._planner.parse(operation)
+        
+        if query_info.operation != "SELECT":
+            raise QueryError("stream_batches_async() only supports SELECT queries")
+        
+        # Resolve adapter
+        adapter = self._resolve_adapter(query_info)
+        if not adapter:
+            raise QueryError("stream_batches_async() requires an adapter-backed table")
+        
+        clean_table = query_info.table.split(".")[-1].strip('"') if query_info.table else query_info.table
+        
+        config = StreamConfig(
+            batch_size=batch_size,
+            max_records=max_records,
+            progress_callback=progress_callback,
+        )
+        
+        if use_buffer:
+            return BufferedAsyncStream(
+                adapter=adapter,
+                table=clean_table,
+                columns=query_info.columns if query_info.columns != ["*"] else None,
+                predicates=query_info.predicates,
+                order_by=query_info.order_by,
+                config=config,
+            )
+        else:
+            return AsyncRecordBatchStream(
+                adapter=adapter,
+                table=clean_table,
+                columns=query_info.columns if query_info.columns != ["*"] else None,
+                predicates=query_info.predicates,
+                order_by=query_info.order_by,
+                config=config,
+            )
+
+    async def stream_to_file_async(
+        self,
+        operation: str,
+        output_path: str,
+        batch_size: int = 1000,
+        compression: str = "snappy",
+        progress_callback = None,
+    ):
+        """
+        Stream query results directly to a Parquet file without loading into memory.
+        
+        This is the most memory-efficient way to export large datasets (async version).
+        
+        Args:
+            operation: SQL SELECT query
+            output_path: Path to output Parquet file
+            batch_size: Number of records per batch (default 1000)
+            compression: Parquet compression ('snappy', 'gzip', 'zstd', 'none')
+            progress_callback: Function(records_fetched, total_estimate) for progress
+            
+        Returns:
+            StreamStats with operation statistics
+            
+        Example:
+            stats = await cursor.stream_to_file_async(
+                "SELECT * FROM large_table",
+                "export.parquet",
+                progress_callback=lambda n, t: print(f"Exported {n:,} records")
+            )
+            print(f"Total: {stats.records_fetched:,} records")
+        """
+        stream = self.stream_batches_async(
+            operation,
+            batch_size=batch_size,
+            progress_callback=progress_callback,
+        )
+        stream._config.compression = compression
+        
+        return await stream.to_parquet(output_path)
+
     def __repr__(self) -> str:
         """String representation for debugging."""
         status = "closed" if self._closed else "open"

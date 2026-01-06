@@ -105,7 +105,7 @@
 
 ## ✅ Completed in v0.1.6
 
-### Data Contracts & Validation ✅ NEW
+### Data Contracts & Validation ✅
 - [x] **Data Contracts**: Pydantic-based schema validation
   - [x] `DataContract` model for table schemas
   - [x] `ColumnContract` model for column definitions
@@ -121,25 +121,70 @@
   - [x] Schema drift detection
   - [x] Contract generation from Arrow schemas
 
+### Streaming & Scalability ✅
+- [x] **Generator-based streaming**: RecordBatch yielding for large result sets
+  - [x] `cursor.stream_batches()` - sync iterator for batched processing
+  - [x] `cursor.stream_batches_async()` - async iterator with backpressure
+  - [x] `BufferedAsyncStream` - prefetching for maximum throughput
+- [x] **Memory-efficient fetching**: Process million-row exports without loading into memory
+  - [x] `cursor.stream_to_file()` - direct-to-Parquet export
+  - [x] `cursor.stream_to_file_async()` - async version
+  - [x] Configurable batch sizes and compression
+- [x] **Progress tracking**: Callbacks for long-running operations
+  - [x] `StreamConfig` with progress_callback support
+  - [x] `StreamStats` for operation statistics
+
+### Salesforce Async CRUD ✅
+- [x] Full async support for Salesforce adapter
+  - [x] `fetch_async`, `insert_async`, `update_async`, `delete_async`
+  - [x] `get_schema_async` for async schema discovery
+
+### Cloud Storage & Data Lakes ✅ NEW
+- [x] **Cloud Storage Adapter** (S3, GCS, Azure Blob via DuckDB httpfs)
+  - [x] `CloudStorageAdapter` - unified adapter for all cloud providers
+  - [x] Automatic provider detection from URI
+  - [x] Factory functions: `s3_adapter()`, `gcs_adapter()`, `azure_adapter()`
+- [x] **Delta Lake Support**
+  - [x] `delta_table()` factory for Delta Lake tables
+  - [x] Version-aware queries via DuckDB delta extension
+- [x] **Apache Iceberg Support**
+  - [x] `iceberg_table()` factory for Iceberg tables
+  - [x] Catalog integration (Glue, Hive, REST)
+- [x] **Google Sheets Adapter**
+  - [x] Query spreadsheets with SQL
+  - [x] Sheet tabs as tables
+  - [x] Automatic type inference
+  - [x] OAuth2 and Service Account authentication
+- [x] **Credential Provider Chain**
+  - [x] Explicit parameters (highest priority)
+  - [x] Environment variables
+  - [x] Config file (~/.waveql/credentials.yaml)
+  - [x] `CloudCredentials` dataclass for unified credential management
+
+### SaaS Expansion ✅ NEW
+- [x] **HubSpot Adapter** (CRM, Contacts, Deals, Tickets)
+  - [x] Search API pushdown
+  - [x] Full CRUD support (Create, Read, Update, Delete)
+  - [x] Auto-pagination
+- [x] **Shopify Adapter** (Orders, Products, Customers)
+  - [x] Link header pagination
+  - [x] CRUD support
+- [x] **Zendesk Adapter** (Tickets, Users, Organizations)
+  - [x] Search API integration
+  - [x] CRUD support
+- [x] **Stripe Adapter** (Payments, Subscriptions, Customers)
+  - [x] Smart API switching (Search vs List)
+  - [x] CRUD support
+
 ---
 
 ## 📋 Planned Features
 
-### v0.1.7 - Streaming & Scalability
-- [ ] Generator-based streaming for large result sets (RecordBatch yielding)
-- [ ] Memory-efficient fetching for million-row exports
-- [ ] Backpressure support for async streams
-
-### v0.1.8 - Cloud Storage Adapters
-- [ ] **Cloud Storage** (S3, GCS, Azure Blob via DuckDB)
-- [ ] **Google Sheets Adapter**
-- [ ] Credential provider chain (env vars, config files, IAM roles)
-
-### v0.1.9 - SaaS Expansion
-- [ ] **HubSpot Adapter** (CRM, Contacts, Deals)
-- [ ] **Shopify Adapter** (Orders, Products, Customers)
-- [ ] **Zendesk Adapter** (Tickets, Users, Organizations)
-- [ ] **Stripe Adapter** (Payments, Subscriptions, Customers)
+### v0.1.7 - Semantic Layer & Metrics
+- [ ] YAML-based metric definitions
+- [ ] Centralized business logic layer
+- [ ] dbt model integration
+- [ ] Data lineage tracking
 
 ### v0.2.0 - Production Ready
 - [ ] **Integration Tests**: Live testing against real sandbox environments
@@ -156,9 +201,17 @@
 | ServiceNow | ✅ | ✅ | ✅ | ✅ |
 | Salesforce | ✅ | ✅ | ✅ | ✅ |
 | Jira | ✅ | ❌ | ✅ | ✅ |
+| **HubSpot** | ✅ | ❌ | ✅ | ✅ |
+| **Shopify** | ✅ | ❌ | ✅ | ✅ |
+| **Zendesk** | ✅ | ❌ | ✅ | ✅ |
+| **Stripe** | ✅ | ❌ | ✅ | ✅ |
 | SQL (MySQL/PostgreSQL/MSSQL) | ✅ | ✅ | ✅ | ❌ |
 | REST | ✅ | ❌ | ✅ | ✅ |
-| File (CSV/Parquet) | ✅ | ✅ | ❌ | ❌ |
+| File (CSV/Parquet) | ✅ | ✅ | ❌ | ✅ |
+| **Cloud Storage (S3/GCS/Azure)** | ✅ | ✅ | ❌ | ✅ |
+| **Delta Lake** | ✅ | ✅ | ❌ | ✅ |
+| **Apache Iceberg** | ✅ | ✅ | ❌ | ✅ |
+| **Google Sheets** | ❌ | ❌ | ✅ | ✅ |
 
 ---
 

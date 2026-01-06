@@ -221,17 +221,16 @@ class JiraAdapter(BaseAdapter):
         order_by: List[tuple],
     ) -> pa.Table:
         """Fetch issues using JQL search."""
-        url = f"{self._host}/rest/api/3/search"
+        # Using new /search/jql endpoint (the old /search was deprecated May 2025)
+        url = f"{self._host}/rest/api/3/search/jql"
         
         # Build JQL query
         jql = self._build_jql(predicates, order_by)
         
-        # Build request body
+        # Build request body - new API uses nextPageToken instead of startAt
         body = {
             "jql": jql,
-            "startAt": offset or 0,
             "maxResults": min(limit or self._page_size, self._page_size),
-            "expand": self._expand,
         }
         
         # Field selection
@@ -244,13 +243,17 @@ class JiraAdapter(BaseAdapter):
             **self._get_auth_headers(),
         }
         
-        # Fetch with pagination
+        # Fetch with pagination using nextPageToken
         all_issues = []
         total_fetched = 0
+        next_page_token = None
         
         with self._get_session() as session:
             while True:
-                body["startAt"] = (offset or 0) + total_fetched
+                if next_page_token:
+                    body["nextPageToken"] = next_page_token
+                elif "nextPageToken" in body:
+                    del body["nextPageToken"]
                 
                 response = self._request_with_retry(
                     lambda: session.post(url, json=body, headers=headers, timeout=self._timeout)
@@ -267,9 +270,11 @@ class JiraAdapter(BaseAdapter):
                 all_issues.extend(issues)
                 total_fetched += len(issues)
                 
+                # New API uses nextPageToken for pagination
+                next_page_token = data.get("nextPageToken")
+                
                 # Check if we have more pages
-                total = data.get("total", 0)
-                if total_fetched >= total:
+                if not next_page_token:
                     break
                 if limit and total_fetched >= limit:
                     break
@@ -294,15 +299,15 @@ class JiraAdapter(BaseAdapter):
         order_by: List[tuple],
     ) -> pa.Table:
         """Fetch issues using JQL search (async)."""
-        url = f"{self._host}/rest/api/3/search"
+        # Using new /search/jql endpoint (the old /search was deprecated May 2025)
+        url = f"{self._host}/rest/api/3/search/jql"
         
         jql = self._build_jql(predicates, order_by)
         
+        # Build request body - new API uses nextPageToken instead of startAt
         body = {
             "jql": jql,
-            "startAt": offset or 0,
             "maxResults": min(limit or self._page_size, self._page_size),
-            "expand": self._expand,
         }
         
         if columns and columns != ["*"]:
@@ -317,9 +322,13 @@ class JiraAdapter(BaseAdapter):
         client = self._get_async_client()
         all_issues = []
         total_fetched = 0
+        next_page_token = None
         
         while True:
-            body["startAt"] = (offset or 0) + total_fetched
+            if next_page_token:
+                body["nextPageToken"] = next_page_token
+            elif "nextPageToken" in body:
+                del body["nextPageToken"]
             
             response = await client.post(url, json=body, headers=headers, timeout=self._timeout)
             
@@ -334,8 +343,11 @@ class JiraAdapter(BaseAdapter):
             all_issues.extend(issues)
             total_fetched += len(issues)
             
-            total = data.get("total", 0)
-            if total_fetched >= total:
+            # New API uses nextPageToken for pagination
+            next_page_token = data.get("nextPageToken")
+            
+            # Check if we have more pages
+            if not next_page_token:
                 break
             if limit and total_fetched >= limit:
                 break
@@ -440,7 +452,12 @@ class JiraAdapter(BaseAdapter):
             for pred in predicates:
                 jql_parts.append(self._predicate_to_jql(pred))
         
-        jql = " AND ".join(jql_parts) if jql_parts else ""
+        # The new /search/jql API requires bounded queries - no empty JQL allowed
+        # Add a default restriction that returns all issues if no predicates
+        if not jql_parts:
+            jql_parts.append("project IS NOT EMPTY")
+        
+        jql = " AND ".join(jql_parts)
         
         # Add ORDER BY
         if order_by:
@@ -641,6 +658,9 @@ class JiraAdapter(BaseAdapter):
             with self._get_session() as session:
                 response = session.post(url, json=issue_data, headers=headers, timeout=self._timeout)
                 response.raise_for_status()
+                # Return the created issue key (useful for follow-up operations)
+                result = response.json()
+                self._last_insert_key = result.get("key")
                 return 1
         except requests.RequestException as e:
             raise QueryError(f"INSERT failed: {e}")

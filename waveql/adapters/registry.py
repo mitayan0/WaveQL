@@ -97,6 +97,48 @@ def _register_builtin_adapters():
     except ImportError:
         pass
 
+    try:
+        from waveql.adapters.cloud_storage import CloudStorageAdapter
+        register_adapter("s3", CloudStorageAdapter)
+        register_adapter("gs", CloudStorageAdapter)
+        register_adapter("gcs", CloudStorageAdapter)
+        register_adapter("azure", CloudStorageAdapter)
+        register_adapter("cloud", CloudStorageAdapter)
+    except ImportError:
+        pass
+
+    try:
+        from waveql.adapters.google_sheets import GoogleSheetsAdapter
+        register_adapter("google_sheets", GoogleSheetsAdapter)
+        register_adapter("sheets", GoogleSheetsAdapter)
+        register_adapter("gsheets", GoogleSheetsAdapter)
+    except ImportError:
+        pass
+
+    try:
+        from waveql.adapters.hubspot import HubSpotAdapter
+        register_adapter("hubspot", HubSpotAdapter)
+    except ImportError:
+        pass
+
+    try:
+        from waveql.adapters.shopify import ShopifyAdapter
+        register_adapter("shopify", ShopifyAdapter)
+    except ImportError:
+        pass
+
+    try:
+        from waveql.adapters.zendesk import ZendeskAdapter
+        register_adapter("zendesk", ZendeskAdapter)
+    except ImportError:
+        pass
+
+    try:
+        from waveql.adapters.stripe import StripeAdapter
+        register_adapter("stripe", StripeAdapter)
+    except ImportError:
+        pass
+
 
 _register_builtin_adapters()
 
