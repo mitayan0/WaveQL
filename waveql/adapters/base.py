@@ -46,6 +46,7 @@ class BaseAdapter(ABC):
     # Adapter metadata
     adapter_name: str = "base"
     supports_predicate_pushdown: bool = True
+    supports_aggregation: bool = False  # Server-side aggregation support
     supports_insert: bool = False
     supports_update: bool = False
     supports_delete: bool = False
@@ -406,6 +407,239 @@ class BaseAdapter(ABC):
             Original exception if all retries fail
         """
         return self._rate_limiter.execute_with_retry(request_func, *args, **kwargs)
+
+    # Performance threshold for client-side aggregation warning
+    CLIENT_SIDE_AGGREGATION_WARNING_THRESHOLD = 5000
+    
+    # Maximum rows to process for approximate aggregation (when enabled)
+    APPROXIMATE_AGGREGATION_SAMPLE_SIZE = 10000
+    
+    def _compute_client_side_aggregates(
+        self,
+        table: pa.Table,
+        group_by: List[str] = None,
+        aggregates: List[Any] = None,
+    ) -> pa.Table:
+        """
+        Compute aggregations client-side with memory-efficient streaming approach.
+        
+        Uses incremental computation to minimize memory usage:
+        - COUNT: Simple counter
+        - SUM: Running total
+        - AVG: Running sum + count
+        - MIN/MAX: Track boundary values
+        
+        For GROUP BY queries, uses Pandas for grouping efficiency.
+        
+        Performance Note:
+            Client-side aggregation requires fetching all matching rows first.
+            For large datasets, this can be slow and memory-intensive.
+            Consider using LIMIT or filtering to reduce data volume.
+        
+        Args:
+            table: Input Arrow table
+            group_by: Columns to group by
+            aggregates: List of Aggregate objects with func, column, alias
+            
+        Returns:
+            Aggregated Arrow table
+        """
+        import pyarrow.compute as pc
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        
+        if not aggregates:
+            return table
+        
+        row_count = len(table)
+        
+        # Performance warning for large datasets
+        if row_count > self.CLIENT_SIDE_AGGREGATION_WARNING_THRESHOLD:
+            logger.warning(
+                f"[{self.adapter_name}] Client-side aggregation on {row_count:,} rows. "
+                f"This may be slow. Consider using LIMIT, WHERE filters, or a more specific query."
+            )
+        
+        # If empty and GROUP BY is present, return empty result
+        # If empty and NO GROUP BY (scalar agg), we must return 1 row (e.g. COUNT(*)=0)
+        if row_count == 0 and group_by:
+            # Return empty result with correct columns
+            result_cols = {}
+            if group_by:
+                for col in group_by:
+                    result_cols[col] = pa.array([], type=pa.string())
+            for agg in aggregates:
+                alias = agg.alias or f"{agg.func.upper()}({agg.column})"
+                # Aggregates on empty groups don't exist
+                result_cols[alias] = pa.array([], type=pa.float64())
+            return pa.table(result_cols)
+        
+        # If row_count == 0 and NO group_by, fall through to _streaming_aggregate
+        # which handles scalar aggregation on empty input (e.g. returns [0] for count)
+        
+        # For GROUP BY queries, use Pandas (efficient groupby implementation)
+        if group_by:
+            return self._aggregate_with_groupby(table, group_by, aggregates)
+        
+        # For non-GROUP BY, use streaming aggregation (memory efficient)
+        return self._streaming_aggregate(table, aggregates)
+    
+    def _streaming_aggregate(
+        self,
+        table: pa.Table,
+        aggregates: List[Any],
+    ) -> pa.Table:
+        """
+        Memory-efficient streaming aggregation without GROUP BY.
+        
+        Uses PyArrow compute functions directly instead of loading into Pandas,
+        reducing memory footprint for large tables.
+        """
+        import pyarrow.compute as pc
+        
+        result_data = {}
+        
+        for agg in aggregates:
+            func = agg.func.upper()
+            col = agg.column
+            alias = agg.alias or f"{func}({col})"
+            
+            if func == "COUNT":
+                if col == "*" or col is None:
+                    result_data[alias] = [len(table)]
+                else:
+                    # Count non-null values in column
+                    if col in table.column_names:
+                        column = table.column(col)
+                        result_data[alias] = [len(column) - pc.sum(pc.is_null(column)).as_py()]
+                    else:
+                        result_data[alias] = [0]
+            
+            elif func in ("SUM", "AVG", "MIN", "MAX"):
+                if col not in table.column_names:
+                    result_data[alias] = [None]
+                    continue
+                    
+                column = table.column(col)
+                
+                # Use PyArrow compute for efficiency
+                if func == "SUM":
+                    result_data[alias] = [pc.sum(column).as_py()]
+                elif func == "AVG":
+                    result_data[alias] = [pc.mean(column).as_py()]
+                elif func == "MIN":
+                    result_data[alias] = [pc.min(column).as_py()]
+                elif func == "MAX":
+                    result_data[alias] = [pc.max(column).as_py()]
+        
+        return pa.table(result_data)
+    
+    def _aggregate_with_groupby(
+        self,
+        table: pa.Table,
+        group_by: List[str],
+        aggregates: List[Any],
+    ) -> pa.Table:
+        """
+        Aggregation with GROUP BY using Pandas (efficient groupby).
+        
+        For grouped aggregations, Pandas provides highly optimized implementations.
+        """
+        df = table.to_pandas()
+        
+        agg_dict = {}
+        for agg in aggregates:
+            func = agg.func.upper()
+            col = agg.column
+            alias = agg.alias or f"{func}({col})"
+            
+            if func == "COUNT":
+                if col == "*" or col is None:
+                    agg_dict[alias] = (group_by[0], "count")
+                else:
+                    agg_dict[alias] = (col, "count")
+            elif func == "SUM":
+                agg_dict[alias] = (col, "sum")
+            elif func == "AVG":
+                agg_dict[alias] = (col, "mean")
+            elif func == "MIN":
+                agg_dict[alias] = (col, "min")
+            elif func == "MAX":
+                agg_dict[alias] = (col, "max")
+        
+        if not agg_dict:
+            return table.select(group_by)
+        
+        result = df.groupby(group_by, as_index=False).agg(**agg_dict)
+        return pa.Table.from_pandas(result, preserve_index=False)
+    
+    def _compute_approximate_aggregates(
+        self,
+        table: pa.Table,
+        group_by: List[str] = None,
+        aggregates: List[Any] = None,
+        sample_size: int = None,
+    ) -> pa.Table:
+        """
+        Compute approximate aggregates using sampling.
+        
+        For very large datasets where exact counts aren't critical,
+        this provides a fast approximation by sampling.
+        
+        Args:
+            table: Input Arrow table
+            group_by: Columns to group by
+            aggregates: List of Aggregate objects
+            sample_size: Number of rows to sample (default: APPROXIMATE_AGGREGATION_SAMPLE_SIZE)
+            
+        Returns:
+            Aggregated Arrow table with approximate values
+        """
+        import pyarrow.compute as pc
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        
+        if not aggregates:
+            return table
+        
+        sample_size = sample_size or self.APPROXIMATE_AGGREGATION_SAMPLE_SIZE
+        total_rows = len(table)
+        
+        if total_rows <= sample_size:
+            # No need to sample, compute exact
+            return self._compute_client_side_aggregates(table, group_by, aggregates)
+        
+        # Sample the data
+        import random
+        indices = sorted(random.sample(range(total_rows), sample_size))
+        sampled_table = table.take(indices)
+        
+        # Compute aggregates on sample
+        result = self._compute_client_side_aggregates(sampled_table, group_by, aggregates)
+        
+        # Adjust COUNT and SUM based on sampling ratio
+        sampling_ratio = total_rows / sample_size
+        
+        result_df = result.to_pandas()
+        for agg in aggregates:
+            func = agg.func.upper()
+            alias = agg.alias or f"{func}({agg.column})"
+            
+            if alias in result_df.columns:
+                if func == "COUNT":
+                    result_df[alias] = (result_df[alias] * sampling_ratio).astype(int)
+                elif func == "SUM":
+                    result_df[alias] = result_df[alias] * sampling_ratio
+                # AVG, MIN, MAX don't need adjustment
+        
+        logger.info(
+            f"[{self.adapter_name}] Approximate aggregation: sampled {sample_size:,} of {total_rows:,} rows "
+            f"(ratio: {sampling_ratio:.2f}x)"
+        )
+        
+        return pa.Table.from_pandas(result_df, preserve_index=False)
 
     def __repr__(self) -> str:
         """String representation for debugging."""

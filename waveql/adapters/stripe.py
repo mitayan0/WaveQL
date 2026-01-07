@@ -32,9 +32,11 @@ class StripeAdapter(BaseAdapter):
     
     adapter_name = "stripe"
     supports_predicate_pushdown = True
+    supports_aggregation = True  # Client-side aggregation support
     supports_insert = True
     supports_update = True
     supports_delete = True
+    supports_batch = True
     
     # Tables that support the Search API
     SEARCHABLE_RESOURCES = {"charges", "customers", "invoices", "subscriptions"}
@@ -80,13 +82,101 @@ class StripeAdapter(BaseAdapter):
         """Fetch data from Stripe API (Search or List)."""
         resource = self.RESOURCE_MAP.get(table.lower(), table.lower())
         
+        # Smart COUNT optimization for simple COUNT(*) queries
+        if self._is_simple_count(aggregates, group_by):
+            return await self._fetch_count_only(resource, predicates, aggregates)
+        
         # Determine if we can use the Search API
         use_search = resource in self.SEARCHABLE_RESOURCES and predicates
         
         if use_search:
-            return await self._fetch_via_search(resource, predicates, limit)
+            result_table = await self._fetch_via_search(resource, predicates, limit)
         else:
-            return await self._fetch_via_list(resource, predicates, limit)
+            result_table = await self._fetch_via_list(resource, predicates, limit)
+        
+        # Apply client-side aggregation if requested
+        if aggregates and len(result_table) > 0:
+            result_table = self._compute_client_side_aggregates(result_table, group_by, aggregates)
+        
+        return result_table
+    
+    def _is_simple_count(self, aggregates: List[Any], group_by: List[str]) -> bool:
+        """Check if this is a simple COUNT(*) query without GROUP BY."""
+        if not aggregates or group_by:
+            return False
+        if len(aggregates) != 1:
+            return False
+        agg = aggregates[0]
+        return agg.func.upper() == "COUNT" and (agg.column == "*" or agg.column is None)
+    
+    async def _fetch_count_only(
+        self,
+        resource: str,
+        predicates: List["Predicate"],
+        aggregates: List[Any],
+    ) -> pa.Table:
+        """
+        Optimized COUNT(*) using Stripe's Search API total_count or minimal fetch.
+        
+        For searchable resources, Search API returns total_count.
+        For others, we do a paginated count with minimal data.
+        """
+        if resource in self.SEARCHABLE_RESOURCES and predicates:
+            # Use Search API's total_count
+            query_parts = []
+            for pred in predicates:
+                if pred.operator == "=":
+                    val = f"'{pred.value}'" if isinstance(pred.value, str) else pred.value
+                    query_parts.append(f"{pred.column}:{val}")
+            
+            search_query = " AND ".join(query_parts) if query_parts else "*"
+            url = f"https://{self._host}/v1/{resource}/search"
+            params = {"query": search_query, "limit": 1}
+            
+            try:
+                response = await self._request_async("GET", url, params=params)
+                data = response.json()
+                total = data.get("total_count", len(data.get("data", [])))
+            except Exception:
+                # Fallback: count via list
+                total = await self._count_via_list(resource)
+        else:
+            # Count via list API (no search available)
+            total = await self._count_via_list(resource)
+        
+        # Build result with proper alias
+        agg = aggregates[0]
+        alias = agg.alias or f"COUNT({agg.column})"
+        
+        logger.debug(f"Stripe COUNT optimization: returned {total}")
+        
+        return pa.table({alias: [total]})
+    
+    async def _count_via_list(self, resource: str) -> int:
+        """Count records by paginating through list API with minimal fields."""
+        url = f"https://{self._host}/v1/{resource}"
+        total = 0
+        starting_after = None
+        
+        while True:
+            params = {"limit": 100}
+            if starting_after:
+                params["starting_after"] = starting_after
+            
+            try:
+                response = await self._request_async("GET", url, params=params)
+                data = response.json()
+                batch = data.get("data", [])
+                total += len(batch)
+                
+                if not data.get("has_more") or not batch:
+                    break
+                
+                starting_after = batch[-1]["id"]
+            except Exception:
+                break
+        
+        return total
 
     async def _fetch_via_search(self, resource: str, predicates: List["Predicate"], limit: int) -> pa.Table:
         """Fetch using Stripe Search API."""
@@ -190,6 +280,18 @@ class StripeAdapter(BaseAdapter):
             return 1
         except Exception as e:
             raise QueryError(f"Stripe insert failed: {e}")
+
+    def insert(self, table: str, values: Dict[str, Any], parameters: Sequence = None) -> int:
+        """Insert a record into Stripe (sync)."""
+        return anyio.run(lambda: self.insert_async(table, values, parameters))
+
+    def update(self, table: str, values: Dict[str, Any], predicates: List["Predicate"] = None, parameters: Sequence = None) -> int:
+        """Update records in Stripe (sync)."""
+        return anyio.run(lambda: self.update_async(table, values, predicates, parameters))
+
+    def delete(self, table: str, predicates: List["Predicate"] = None, parameters: Sequence = None) -> int:
+        """Delete records in Stripe (sync)."""
+        return anyio.run(lambda: self.delete_async(table, predicates, parameters))
 
     async def _request_async(self, method: str, url: str, **kwargs) -> Any:
         import httpx

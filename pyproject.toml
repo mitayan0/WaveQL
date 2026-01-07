@@ -46,6 +46,9 @@ dev = [
     "black",
     "ruff",
 ]
+postgres = [
+    "psycopg2-binary>=2.9",
+]
 
 [project.urls]
 Homepage = "https://github.com/mitayan0/WaveQL"

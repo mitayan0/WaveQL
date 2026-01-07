@@ -204,16 +204,34 @@ class MaterializedViewManager:
         
         cursor = self.connection.cursor()
         cursor.execute(query)
-        result = cursor.fetchall()
         
-        # Convert to Arrow Table
-        if hasattr(result, 'to_pyarrow'):
-            data = result.to_pyarrow()
-        elif isinstance(result, pa.Table):
-            data = result
+        # Try to get Arrow result directly from cursor (most efficient)
+        if hasattr(cursor, 'to_arrow'):
+            data = cursor.to_arrow()
+            # If to_arrow returns None (e.g. no result), try fetchall
+            if data is None:
+                result = cursor.fetchall()
+                if hasattr(result, 'to_pyarrow'):
+                    data = result.to_pyarrow()
+                elif isinstance(result, pa.Table):
+                    data = result
+                else:
+                    # Last resort: convert list of rows or try direct execution
+                    # For now, re-executing on DuckDB is dangerous if table isn't there
+                    # So we assume if to_arrow failed, we might use empty table with schema?
+                    # Or try to infer from list of dicts.
+                    if result and len(result) > 0 and hasattr(result[0], 'keys'):
+                        data = pa.Table.from_pylist([r.as_dict() for r in result])
+                    else:
+                        # Fallback for truly empty results or raw DuckDB usage
+                         data = self.connection.duckdb.execute(query).fetch_arrow_table()
         else:
-            # Convert via DuckDB
-            data = self.connection.duckdb.execute(query).fetch_arrow_table()
+             # Standard DB-API fallback
+             result = cursor.fetchall()
+             if hasattr(result, 'to_pyarrow'):
+                 data = result.to_pyarrow()
+             else:
+                 data = self.connection.duckdb.execute(query).fetch_arrow_table()
         
         duration_ms = (time.time() - start_time) * 1000
         
@@ -312,8 +330,23 @@ class MaterializedViewManager:
         """Perform a full refresh of the view."""
         logger.info("Performing full refresh of '%s'", view.name)
         
-        # Re-execute the query
-        data = self.connection.duckdb.execute(view.query).fetch_arrow_table()
+        # Re-execute the query using WaveQL cursor to handle adapters
+        cursor = self.connection.cursor()
+        cursor.execute(view.query)
+        
+        # Get data as arrow table
+        if hasattr(cursor, 'to_arrow'):
+            data = cursor.to_arrow()
+        else:
+             result = cursor.fetchall()
+             if hasattr(result, 'to_pyarrow'):
+                 data = result.to_pyarrow()
+             elif isinstance(result, pa.Table):
+                 data = result
+             else:
+                 # Fallback to duckdb execution if cursor failed to give data
+                 # (This will fail for adapter tables, but works for local ones)
+                 data = self.connection.duckdb.execute(view.query).fetch_arrow_table()
         
         # Write to storage (replaces existing)
         stats = self.storage.write(view.name, data)

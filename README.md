@@ -33,9 +33,10 @@ Built for data engineers and developers, it translates your SQL queries into opt
 
 *   **Universal Adapter System**: Connect to ServiceNow, Salesforce, Jira, Google Sheets, and Cloud Storage with a unified interface.
 *   **Intelligent Query Pushdown**: We don't just fetch all data. `WHERE` clauses are translated into native API filters (e.g., JQL, SOQL) for maximum performance.
+*   **Universal Aggregation Support**: Native server-side aggregation for ServiceNow/Salesforce/SQL, and optimized client-side aggregation (Streaming & Smart COUNT) for HubSpot, Shopify, and more.
 *   **High-Scale Streaming**: Memory-efficient RecordBatch streaming with backpressure for million-row datasets.
 *   **Query Result Caching**: Built-in LRU cache with TTL support reduces API calls and speeds up repeated queries.
-*   **Change Data Capture (CDC)**: Real-time streaming of table changes (Inserts, Updates) directly from your SaaS apps.
+*   **Change Data Capture (CDC)**: Real-time streaming of table changes using Polling (for SaaS) or zero-latency WAL streaming (for PostgreSQL).
 *   **Cross-Source JOINs**: Seamlessly join data between your local CSVs, a Jira backlog, and ServiceNow incidents using our DuckDB-powered engine.
 *   **Data Lake Support**: Native support for **Delta Lake** and **Apache Iceberg** formats on S3, GCS, and Azure.
 *   **Async Built-in**: Built on `httpx` and `anyio` for high-concurrency, non-blocking applications.
@@ -45,6 +46,8 @@ Built for data engineers and developers, it translates your SQL queries into opt
 
 ```bash
 pip install waveql
+# For PostgreSQL support:
+pip install waveql[postgres]
 ```
 
 Or install from source:
@@ -170,13 +173,13 @@ conn = waveql.connect("servicenow://...", cache_config=config)
 
 | Adapter | URI Scheme | Features |
 |:--------|:-----------|:---------|
-| **ServiceNow** | `servicenow://` | Table API, **Aggregates**, CDC, CRUD |
+| **ServiceNow** | `servicenow://` | Table API, **Server Aggregates**, CDC, CRUD |
 | **Salesforce** | `salesforce://` | SOQL Pushdown, **Async CRUD**, Bulk API |
 | **Jira** | `jira://` | JQL Pushdown, Issues/Projects/Users, CRUD |
-| **HubSpot** | `hubspot://` | Search API v3, Contact/Company/Deal, CRUD |
-| **Shopify** | `shopify://` | Orders/Products, CRUD, Link Pagination |
-| **Zendesk** | `zendesk://` | Ticket Search, CRUD, OAuth2 |
-| **Stripe** | `stripe://` | Search/List API Switching, CRUD |
+| **HubSpot** | `hubspot://` | Search API v3, **Smart COUNT**, CRUD |
+| **Shopify** | `shopify://` | Orders/Products, **Smart COUNT**, CRUD |
+| **Zendesk** | `zendesk://` | Ticket Search, **Smart COUNT**, CRUD |
+| **Stripe** | `stripe://` | Search/List API, **Smart COUNT**, CRUD |
 | **SQL DB** | `postgresql://` | Full SQL Passthrough via SQLAlchemy |
 | **Cloud Storage** | `s3://`, `gs://` | Parquet/CSV, **Delta Lake**, **Iceberg** |
 | **Google Sheets** | `google_sheets://` | Spreadsheets as Tables, Read/Write |
@@ -193,7 +196,10 @@ SELECT * FROM "servicenow"."incident"
 SELECT * FROM servicenow."incident"
 ```
 
-**Supports:** `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `JOIN`, `GROUP BY`, `ORDER BY`, `LIMIT`, `OFFSET`
+**Supports**: `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `JOIN`, `GROUP BY`, `ORDER BY`, `LIMIT`, `OFFSET`
+**Aggregates**: `COUNT(*)`, `COUNT(col)`, `SUM`, `AVG`, `MIN`, `MAX`
+
+> ⚡ **Performance Note**: WaveQL automatically optimizes `COUNT(*)` queries using API-native mechanisms (Smart COUNT) for HubSpot, Shopify, Zendesk, and Stripe, reducing execution time from minutes to milliseconds.
 
 
 ## Authentication

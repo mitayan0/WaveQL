@@ -1,6 +1,6 @@
 # WaveQL Project Roadmap
 
-> **Last Updated:** 2026-01-06  
+> **Last Updated:** 2026-01-07  
 > **Current Version:** 0.1.6
 
 ---
@@ -178,6 +178,39 @@
 
 ---
 
+### Universal Aggregation Support ✅
+- [x] **Client-Side Aggregation Engine**
+  - [x] `_compute_client_side_aggregates()` in BaseAdapter
+  - [x] `_streaming_aggregate()` - PyArrow-based, memory-efficient
+  - [x] `_aggregate_with_groupby()` - Pandas-based for GROUP BY
+  - [x] `_compute_approximate_aggregates()` - Sampling-based for large datasets
+- [x] **Smart COUNT Optimization**
+  - [x] HubSpot: Uses API `total` field
+  - [x] Shopify: Uses `/count.json` endpoint
+  - [x] Zendesk: Uses API `count` field
+  - [x] Stripe: Uses `total_count` from Search API
+- [x] **Adapter Feature Parity**
+  - [x] All SaaS adapters now have `supports_aggregation = True`
+  - [x] All SaaS adapters now have `supports_batch = True`
+  - [x] Sync CRUD wrappers for HubSpot, Shopify, Zendesk, Stripe
+- [x] **Performance Monitoring**
+  - [x] Warning threshold (5,000 rows) for client-side aggregation
+  - [x] Logging for performance visibility
+- [x] **Test Coverage**
+  - [x] 24 new aggregation tests in `test_aggregation.py`
+
+### PostgreSQL WAL-Based CDC ✅
+- [x] **Zero-Latency Streaming**
+  - [x] Logical Replication/WAL integration
+  - [x] `wal2json` and `test_decoding` support
+  - [x] Async streaming iterator (`stream_changes_wal`)
+- [x] **Reliability Features**
+  - [x] Automatic slot management
+  - [x] Exponential backoff and retry logic
+  - [x] Guaranteed delivery via replication slots
+
+---
+
 ## 📋 Planned Features
 
 ### v0.1.7 - Semantic Layer & Metrics
@@ -190,28 +223,33 @@
 - [ ] **Integration Tests**: Live testing against real sandbox environments
 - [ ] **GraphQL Adapter**: Generic GraphQL source support
 - [ ] **Plugin System**: Custom adapter SDK for third-party extensions
+- [ ] **PostgreSQL CDC V2**
+  - [ ] **State Persistence**: Client-side LSN checkpointing
+  - [ ] **DDL Awareness**: Schema change detection via Event Triggers
+  - [ ] **Advanced Decoding**: Robust parser for `test_decoding` (arrays, JSONB)
+  - [ ] **High Availability**: Failover slot support
 - [ ] Stable API guarantee (no breaking changes in 0.2.x)
 
 ---
 
 ## 📊 Feature Matrix
 
-| Adapter | Predicate Pushdown | Aggregation | CRUD | Async |
-|---------|-------------------|-------------|------|-------|
-| ServiceNow | ✅ | ✅ | ✅ | ✅ |
-| Salesforce | ✅ | ✅ | ✅ | ✅ |
-| Jira | ✅ | ❌ | ✅ | ✅ |
-| **HubSpot** | ✅ | ❌ | ✅ | ✅ |
-| **Shopify** | ✅ | ❌ | ✅ | ✅ |
-| **Zendesk** | ✅ | ❌ | ✅ | ✅ |
-| **Stripe** | ✅ | ❌ | ✅ | ✅ |
-| SQL (MySQL/PostgreSQL/MSSQL) | ✅ | ✅ | ✅ | ❌ |
-| REST | ✅ | ❌ | ✅ | ✅ |
-| File (CSV/Parquet) | ✅ | ✅ | ❌ | ✅ |
-| **Cloud Storage (S3/GCS/Azure)** | ✅ | ✅ | ❌ | ✅ |
-| **Delta Lake** | ✅ | ✅ | ❌ | ✅ |
-| **Apache Iceberg** | ✅ | ✅ | ❌ | ✅ |
-| **Google Sheets** | ❌ | ❌ | ✅ | ✅ |
+| Adapter | Predicate Pushdown | Aggregation | CRUD | Async | Batch |
+|---------|-------------------|-------------|------|-------|-------|
+| ServiceNow | ✅ | ✅ (Server) | ✅ | ✅ | ✅ |
+| Salesforce | ✅ | ✅ (Server) | ✅ | ✅ | ✅ |
+| Jira | ✅ | ✅ (Client) | ✅ | ✅ | ❌ |
+| **HubSpot** | ✅ | ✅ (Client) | ✅ | ✅ | ✅ |
+| **Shopify** | ✅ | ✅ (Client) | ✅ | ✅ | ✅ |
+| **Zendesk** | ✅ | ✅ (Client) | ✅ | ✅ | ✅ |
+| **Stripe** | ✅ | ✅ (Client) | ✅ | ✅ | ✅ |
+| SQL (MySQL/PostgreSQL/MSSQL) | ✅ | ✅ (Server) | ✅ | ❌ | ✅ |
+| REST | ✅ | ❌ | ✅ | ✅ | ❌ |
+| File (CSV/Parquet) | ✅ | ✅ (DuckDB) | ❌ | ✅ | ❌ |
+| **Cloud Storage (S3/GCS/Azure)** | ✅ | ✅ (DuckDB) | ❌ | ✅ | ❌ |
+| **Delta Lake** | ✅ | ✅ (DuckDB) | ❌ | ✅ | ❌ |
+| **Apache Iceberg** | ✅ | ✅ (DuckDB) | ❌ | ✅ | ❌ |
+| **Google Sheets** | ❌ | ✅ (Client) | ✅ | ✅ | ✅ |
 
 ---
 

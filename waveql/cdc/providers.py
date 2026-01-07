@@ -480,12 +480,27 @@ class JiraCDCProvider(BaseCDCProvider):
         return datetime.now()
 
 
+# Import PostgreSQL provider (optional dependency)
+try:
+    from waveql.cdc.postgres import PostgresCDCProvider
+    _HAS_POSTGRES_CDC = True
+except ImportError:
+    _HAS_POSTGRES_CDC = False
+    PostgresCDCProvider = None
+
+
 # Registry of CDC providers by adapter name
 CDC_PROVIDERS = {
     "servicenow": ServiceNowCDCProvider,
     "salesforce": SalesforceCDCProvider,
     "jira": JiraCDCProvider,
 }
+
+# Add PostgreSQL if available
+if _HAS_POSTGRES_CDC:
+    CDC_PROVIDERS["postgres"] = PostgresCDCProvider
+    CDC_PROVIDERS["postgresql"] = PostgresCDCProvider
+    CDC_PROVIDERS["sql"] = PostgresCDCProvider  # For SQLAdapter with postgres
 
 
 def get_cdc_provider(adapter_name: str, adapter: "BaseAdapter") -> Optional[BaseCDCProvider]:

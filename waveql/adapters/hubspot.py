@@ -34,9 +34,11 @@ class HubSpotAdapter(BaseAdapter):
     
     adapter_name = "hubspot"
     supports_predicate_pushdown = True
+    supports_aggregation = True  # Client-side aggregation support
     supports_insert = True
     supports_update = True
     supports_delete = True
+    supports_batch = True
     
     # Mapping of common table names to HubSpot object types
     OBJECT_TYPE_MAP = {
@@ -97,6 +99,10 @@ class HubSpotAdapter(BaseAdapter):
         """Fetch data from HubSpot CRM (async)."""
         object_type = self._get_object_type(table)
         
+        # Smart COUNT optimization: Use API's total count for simple COUNT(*) queries
+        if self._is_simple_count(aggregates, group_by):
+            return await self._fetch_count_only(object_type, predicates, aggregates)
+        
         # Build Search API payload
         payload = self._build_search_payload(columns, predicates, limit, offset, order_by)
         
@@ -142,10 +148,59 @@ class HubSpotAdapter(BaseAdapter):
             
             # Convert to Arrow Table
             table_data = {k: [r.get(k) for r in results] for k in results[0].keys()}
-            return pa.table(table_data)
+            result_table = pa.table(table_data)
+            
+            # Apply client-side aggregation if requested
+            if aggregates:
+                result_table = self._compute_client_side_aggregates(result_table, group_by, aggregates)
+            
+            return result_table
             
         except Exception as e:
             raise AdapterError(f"HubSpot search failed: {e}")
+    
+    def _is_simple_count(self, aggregates: List[Any], group_by: List[str]) -> bool:
+        """Check if this is a simple COUNT(*) query without GROUP BY."""
+        if not aggregates or group_by:
+            return False
+        if len(aggregates) != 1:
+            return False
+        agg = aggregates[0]
+        return agg.func.upper() == "COUNT" and (agg.column == "*" or agg.column is None)
+    
+    async def _fetch_count_only(
+        self,
+        object_type: str,
+        predicates: List["Predicate"],
+        aggregates: List[Any],
+    ) -> pa.Table:
+        """
+        Optimized COUNT(*) using API's total field.
+        
+        Instead of fetching all records, we make a single API call with limit=0
+        and use the 'total' field from the response.
+        """
+        url = f"https://{self._host}/crm/v3/objects/{object_type}/search"
+        
+        payload = self._build_search_payload(None, predicates, 1, None, None)
+        payload["limit"] = 1  # Minimize data transfer
+        
+        try:
+            response = await self._request_async("POST", url, json=payload)
+            data = response.json()
+            
+            total = data.get("total", 0)
+            
+            # Build result with proper alias
+            agg = aggregates[0]
+            alias = agg.alias or f"COUNT({agg.column})"
+            
+            logger.debug(f"HubSpot COUNT optimization: returned {total} using API total field")
+            
+            return pa.table({alias: [total]})
+            
+        except Exception as e:
+            raise AdapterError(f"HubSpot count failed: {e}")
 
     def fetch(self, *args, **kwargs) -> pa.Table:
         """Synchronous fetch (runs async)."""
@@ -244,6 +299,18 @@ class HubSpotAdapter(BaseAdapter):
     def list_tables(self) -> List[str]:
         """List standard HubSpot CRM objects."""
         return list(self.OBJECT_TYPE_MAP.keys())
+
+    def insert(self, table: str, values: Dict[str, Any], parameters: Sequence = None) -> int:
+        """Insert a record into HubSpot (sync)."""
+        return anyio.run(lambda: self.insert_async(table, values, parameters))
+
+    def update(self, table: str, values: Dict[str, Any], predicates: List["Predicate"] = None, parameters: Sequence = None) -> int:
+        """Update records in HubSpot (sync)."""
+        return anyio.run(lambda: self.update_async(table, values, predicates, parameters))
+
+    def delete(self, table: str, predicates: List["Predicate"] = None, parameters: Sequence = None) -> int:
+        """Delete records in HubSpot (sync)."""
+        return anyio.run(lambda: self.delete_async(table, predicates, parameters))
 
     async def insert_async(self, table: str, values: Dict[str, Any], parameters: Sequence = None) -> int:
         """Insert a record into HubSpot (async)."""

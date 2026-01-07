@@ -211,6 +211,17 @@ class WaveQLCursor:
         if not table_name:
             return None
         
+        clean_table = self._clean_table_name(table_name)
+        
+        # 1. Check if it's a known Materialized View (Local execution)
+        # We access the view manager via the connection
+        try:
+             # Lazy check to avoid cyclic imports or init issues
+             if hasattr(self._connection, 'view_manager') and self._connection.view_manager.exists(clean_table):
+                 return None # Execute locally in DuckDB
+        except Exception:
+             pass
+        
         # Check for schema prefix (e.g., "sales.Account" or "servicenow"."incident")
         if "." in table_name:
             schema, _ = table_name.split(".", 1)
