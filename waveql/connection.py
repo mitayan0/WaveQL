@@ -307,6 +307,79 @@ class WaveQLConnection(ConnectionMixin):
         
         return CDCStream(self, table, config)
     
+    def stream_changes_wal(
+        self,
+        table: str,
+        slot_name: str = "waveql_cdc",
+        output_plugin: str = "wal2json",
+        create_slot: bool = True,
+    ):
+        """
+        Create a PostgreSQL WAL-based CDC stream for zero-latency change detection.
+        
+        This uses PostgreSQL's Logical Replication to stream changes directly
+        from the Write-Ahead Log, providing millisecond-level latency without
+        any polling overhead.
+        
+        Requirements:
+        - PostgreSQL 9.4+ with wal_level=logical
+        - User with REPLICATION privilege
+        - wal2json or test_decoding output plugin
+        
+        Args:
+            table: Table to watch (e.g., 'public.users' or just 'users')
+            slot_name: Logical replication slot name
+            output_plugin: 'wal2json' (recommended) or 'test_decoding'
+            create_slot: Auto-create slot if it doesn't exist
+            
+        Returns:
+            PostgresCDCProvider that can be used with 'async for'
+            
+        Example:
+            ```python
+            # Connect to PostgreSQL
+            conn = waveql.connect("postgresql://user:pass@localhost/db")
+            
+            # Stream changes in real-time (zero polling!)
+            provider = conn.stream_changes_wal("users")
+            async for change in provider.stream_changes("users"):
+                print(f"{change.operation}: {change.data}")
+            ```
+            
+        Note:
+            Unlike stream_changes() which uses polling, this method provides
+            true push-based streaming with guaranteed delivery. Changes are
+            never missed even if your application restarts.
+        """
+        from waveql.cdc.postgres import PostgresCDCProvider
+        
+        adapter = self.get_adapter("default")
+        if adapter is None:
+            raise ValueError("No adapter configured for this connection")
+        
+        # Build connection string - try to get it from adapter or use our stored host
+        connection_string = None
+        if hasattr(adapter, '_connection_string'):
+            connection_string = adapter._connection_string
+        elif hasattr(adapter, '_host') and adapter._host:
+            connection_string = adapter._host
+        elif self._host:
+            # If host looks like a connection string (starts with postgres://)
+            if self._host.startswith("postgres"):
+                connection_string = self._host
+            else:
+                # Try to build one from components
+                # This is a fallback for when we have separate host/user/pass
+                connection_string = self._host
+        
+        return PostgresCDCProvider(
+            adapter=adapter,
+            connection_string=connection_string,
+            slot_name=slot_name,
+            output_plugin=output_plugin,
+            create_slot=create_slot,
+        )
+    
     async def get_changes(
         self,
         table: str,

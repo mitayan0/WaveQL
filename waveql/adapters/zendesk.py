@@ -32,9 +32,11 @@ class ZendeskAdapter(BaseAdapter):
     
     adapter_name = "zendesk"
     supports_predicate_pushdown = True
+    supports_aggregation = True  # Client-side aggregation support
     supports_insert = True
     supports_update = True
     supports_delete = True
+    supports_batch = True
     
     # Mapping of tables to Zendesk types
     TYPE_MAP = {
@@ -88,6 +90,11 @@ class ZendeskAdapter(BaseAdapter):
                     query_parts.append(f"{pred.column}<{pred.value}")
         
         search_query = " ".join(query_parts)
+        
+        # Smart COUNT optimization: Use API's count field for simple COUNT(*) queries
+        if self._is_simple_count(aggregates, group_by):
+            return await self._fetch_count_only(search_query, aggregates)
+        
         url = f"https://{self._host}/api/v2/search.json"
         
         params = {"query": search_query}
@@ -116,10 +123,55 @@ class ZendeskAdapter(BaseAdapter):
             if not results:
                 return pa.table({})
             
-            return pa.Table.from_pylist(results)
+            result_table = pa.Table.from_pylist(results)
+            
+            # Apply client-side aggregation if requested
+            if aggregates:
+                result_table = self._compute_client_side_aggregates(result_table, group_by, aggregates)
+            
+            return result_table
             
         except Exception as e:
             raise AdapterError(f"Zendesk search failed: {e}")
+    
+    def _is_simple_count(self, aggregates: List[Any], group_by: List[str]) -> bool:
+        """Check if this is a simple COUNT(*) query without GROUP BY."""
+        if not aggregates or group_by:
+            return False
+        if len(aggregates) != 1:
+            return False
+        agg = aggregates[0]
+        return agg.func.upper() == "COUNT" and (agg.column == "*" or agg.column is None)
+    
+    async def _fetch_count_only(
+        self,
+        search_query: str,
+        aggregates: List[Any],
+    ) -> pa.Table:
+        """
+        Optimized COUNT(*) using API's count field.
+        
+        Zendesk Search API returns a 'count' field showing total matching results.
+        """
+        url = f"https://{self._host}/api/v2/search.json"
+        params = {"query": search_query, "per_page": 1}  # Minimize data transfer
+        
+        try:
+            response = await self._request_async("GET", url, params=params)
+            data = response.json()
+            
+            total = data.get("count", 0)
+            
+            # Build result with proper alias
+            agg = aggregates[0]
+            alias = agg.alias or f"COUNT({agg.column})"
+            
+            logger.debug(f"Zendesk COUNT optimization: returned {total} using API count field")
+            
+            return pa.table({alias: [total]})
+            
+        except Exception as e:
+            raise AdapterError(f"Zendesk count failed: {e}")
 
     def fetch(self, *args, **kwargs) -> pa.Table:
         return anyio.run(lambda: self.fetch_async(*args, **kwargs))
@@ -151,6 +203,18 @@ class ZendeskAdapter(BaseAdapter):
             return columns
         except Exception:
             return []
+
+    def insert(self, table: str, values: Dict[str, Any], parameters: Sequence = None) -> int:
+        """Insert a record into Zendesk (sync)."""
+        return anyio.run(lambda: self.insert_async(table, values, parameters))
+
+    def update(self, table: str, values: Dict[str, Any], predicates: List["Predicate"] = None, parameters: Sequence = None) -> int:
+        """Update records in Zendesk (sync)."""
+        return anyio.run(lambda: self.update_async(table, values, predicates, parameters))
+
+    def delete(self, table: str, predicates: List["Predicate"] = None, parameters: Sequence = None) -> int:
+        """Delete records in Zendesk (sync)."""
+        return anyio.run(lambda: self.delete_async(table, predicates, parameters))
 
     async def insert_async(self, table: str, values: Dict[str, Any], parameters: Sequence = None) -> int:
         resource = table.lower()

@@ -33,9 +33,11 @@ class ShopifyAdapter(BaseAdapter):
     
     adapter_name = "shopify"
     supports_predicate_pushdown = True
+    supports_aggregation = True  # Client-side aggregation support
     supports_insert = True
     supports_update = True
     supports_delete = True
+    supports_batch = True
     
     API_VERSION = "2024-01"
     
@@ -79,6 +81,11 @@ class ShopifyAdapter(BaseAdapter):
     ) -> pa.Table:
         """Fetch data from Shopify REST API (async)."""
         resource = self._get_resource(table)
+        
+        # Smart COUNT optimization: Use dedicated /count.json endpoint for simple COUNT(*)
+        if self._is_simple_count(aggregates, group_by):
+            return await self._fetch_count_only(resource, predicates, aggregates)
+        
         url = f"https://{self._shop_url}/admin/api/{self.API_VERSION}/{resource}.json"
         
         # Build query parameters for pushdown
@@ -124,10 +131,68 @@ class ShopifyAdapter(BaseAdapter):
                 return pa.table({})
             
             # Shopify returns nested objects, we flatten them slightly
-            return pa.Table.from_pylist(results)
+            result_table = pa.Table.from_pylist(results)
+            
+            # Apply client-side aggregation if requested
+            if aggregates:
+                result_table = self._compute_client_side_aggregates(result_table, group_by, aggregates)
+            
+            return result_table
             
         except Exception as e:
             raise AdapterError(f"Shopify fetch failed: {e}")
+    
+    def _is_simple_count(self, aggregates: List[Any], group_by: List[str]) -> bool:
+        """Check if this is a simple COUNT(*) query without GROUP BY."""
+        if not aggregates or group_by:
+            return False
+        if len(aggregates) != 1:
+            return False
+        agg = aggregates[0]
+        return agg.func.upper() == "COUNT" and (agg.column == "*" or agg.column is None)
+    
+    async def _fetch_count_only(
+        self,
+        resource: str,
+        predicates: List["Predicate"],
+        aggregates: List[Any],
+    ) -> pa.Table:
+        """
+        Optimized COUNT(*) using Shopify's dedicated /count.json endpoint.
+        
+        Shopify provides /admin/api/{version}/{resource}/count.json for efficient counting.
+        """
+        url = f"https://{self._shop_url}/admin/api/{self.API_VERSION}/{resource}/count.json"
+        
+        # Build filter params (same logic as fetch)
+        params = {}
+        if predicates:
+            for pred in predicates:
+                if pred.operator == "=":
+                    if pred.column == "status":
+                        params["status"] = pred.value
+                elif pred.operator == ">=":
+                    if pred.column == "updated_at":
+                        params["updated_at_min"] = pred.value
+                    elif pred.column == "created_at":
+                        params["created_at_min"] = pred.value
+        
+        try:
+            response = await self._request_async("GET", url, params=params if params else None)
+            data = response.json()
+            
+            total = data.get("count", 0)
+            
+            # Build result with proper alias
+            agg = aggregates[0]
+            alias = agg.alias or f"COUNT({agg.column})"
+            
+            logger.debug(f"Shopify COUNT optimization: returned {total} using /count.json endpoint")
+            
+            return pa.table({alias: [total]})
+            
+        except Exception as e:
+            raise AdapterError(f"Shopify count failed: {e}")
 
     def fetch(self, *args, **kwargs) -> pa.Table:
         return anyio.run(lambda: self.fetch_async(*args, **kwargs))
@@ -189,6 +254,18 @@ class ShopifyAdapter(BaseAdapter):
             return 1
         except Exception as e:
             raise QueryError(f"Shopify insert failed: {e}")
+
+    def insert(self, table: str, values: Dict[str, Any], parameters: Sequence = None) -> int:
+        """Insert a record into Shopify (sync)."""
+        return anyio.run(lambda: self.insert_async(table, values, parameters))
+
+    def update(self, table: str, values: Dict[str, Any], predicates: List["Predicate"] = None, parameters: Sequence = None) -> int:
+        """Update records in Shopify (sync)."""
+        return anyio.run(lambda: self.update_async(table, values, predicates, parameters))
+
+    def delete(self, table: str, predicates: List["Predicate"] = None, parameters: Sequence = None) -> int:
+        """Delete records in Shopify (sync)."""
+        return anyio.run(lambda: self.delete_async(table, predicates, parameters))
 
     async def _request_async(self, method: str, url: str, **kwargs) -> Any:
         import httpx

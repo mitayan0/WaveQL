@@ -5,9 +5,58 @@ All notable changes to WaveQL will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.6] - 2026-01-07
 
-## [0.1.6] - 2026-01-06
+### Added
+
+- **Universal Client-Side Aggregation Support**
+  - New `_compute_client_side_aggregates()` helper in `BaseAdapter` for adapters without native aggregation APIs
+  - Supports COUNT, SUM, AVG, MIN, MAX with optional GROUP BY
+  - All SaaS adapters now support aggregation queries (computed locally after fetching)
+  
+- **Adapter Feature Parity Enhancements**
+  - **HubSpot**: Added `supports_aggregation=True`, `supports_batch=True`, sync CRUD wrappers
+  - **Shopify**: Added `supports_aggregation=True`, `supports_batch=True`, sync CRUD wrappers
+  - **Zendesk**: Added `supports_aggregation=True`, `supports_batch=True`, sync CRUD wrappers
+  - **Stripe**: Added `supports_aggregation=True`, `supports_batch=True`, sync CRUD wrappers
+  - **Google Sheets**: Added `supports_aggregation=True`, `supports_batch=True`
+  - **Jira**: Changed from `NotImplementedError` to client-side aggregation support
+
+- **BaseAdapter Enhancements**
+  - New `supports_aggregation` class attribute for capability detection
+  - Aggregation support documented in Feature Matrix (Server vs Client distinctions)
+
+- **Smart COUNT Optimization** ⚡
+  - **HubSpot**: Uses `total` field from Search API response for `COUNT(*)` queries
+  - **Shopify**: Uses dedicated `/count.json` endpoint for efficient counting
+  - **Zendesk**: Uses `count` field from Search API response
+  - **Stripe**: Uses `total_count` from Search API for searchable resources
+  - Result: `SELECT COUNT(*) FROM hubspot.contacts` now executes in **1 API call** instead of 100+
+
+- **Memory-Efficient Streaming Aggregation** (Inspired by Trino/Presto)
+  - Uses PyArrow compute functions directly instead of loading entire table into Pandas
+  - Reduced memory footprint for non-GROUP BY aggregations
+  - Separates `_streaming_aggregate()` for simple cases from `_aggregate_with_groupby()` for grouped queries
+
+- **Approximate Aggregation Support** (New)
+  - New `_compute_approximate_aggregates()` method for very large datasets
+  - Uses random sampling with automatic ratio adjustment for COUNT/SUM
+  - Configurable sample size via `APPROXIMATE_AGGREGATION_SAMPLE_SIZE` (default: 10,000 rows)
+
+- **PostgreSQL Change Data Capture (CDC)** (New) 🚀
+  - Zero-latency WAL-based streaming using Logical Replication
+  - Support for `wal2json` and `test_decoding` plugins
+  - Fully async implementation (`async for change in provider.stream_changes()`)
+  - Integration with WaveQL connection (`conn.stream_changes_wal()`)
+  - Capture of INSERT, UPDATE, DELETE events with full before/after data
+  - Automated replication slot management (create/drop/monitor)
+  - Retry logic with exponential backoff for resilient streaming
+
+- **Performance Warnings**
+  - Logs warning when client-side aggregation processes >5,000 rows
+  - Helps users identify queries that could benefit from LIMIT or filtering
+
+
 
 ### Added
 

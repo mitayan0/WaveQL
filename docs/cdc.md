@@ -5,17 +5,110 @@ WaveQL provides a robust Change Data Capture (CDC) system that allows you to str
 ## Concepts
 
 The CDC system is built on an async stream processing model. 
-*   **Provider**: Each adapter (like ServiceNow) has a CDC Provider that knows how to poll or listen for changes.
+*   **Provider**: Each adapter has a CDC Provider that knows how to poll or listen for changes.
 *   **Stream**: A continuous flow of `Change` objects.
 *   **State**: The stream maintains state (last timestamp/key) to ensure no data is lost during restarts (persistence logic to be implemented by user).
 
-## Basic Usage
+## CDC Methods
+
+WaveQL supports two CDC methods:
+
+| Method | Latency | Overhead | Use Case |
+|:-------|:--------|:---------|:---------|
+| **Polling** | Seconds to minutes | Queries the database repeatedly | SaaS APIs (ServiceNow, Jira, Salesforce) |
+| **WAL Streaming** | Milliseconds | Zero (push-based) | PostgreSQL databases |
+
+## Basic Usage (Polling-Based)
 
 The easiest way to use CDC is via the `stream_changes` method on an async connection.
 
 ```python
 async for change in conn.stream_changes("table_name"):
     print(change)
+```
+
+## PostgreSQL WAL-Based CDC (NEW!)
+
+For PostgreSQL databases, WaveQL supports true Change Data Capture using Logical Replication. This provides:
+
+- **Millisecond latency**: Changes arrive within milliseconds of `COMMIT`
+- **Zero polling overhead**: Push-based streaming, no database queries
+- **Guaranteed delivery**: Replication slots ensure no events are lost
+- **Before/after data**: Full access to old values on UPDATE/DELETE
+
+### Prerequisites
+
+1. **PostgreSQL 9.4+** with `wal_level = logical`
+2. **User with REPLICATION privilege**
+3. **Output plugin**: `wal2json` (recommended) or `test_decoding` (built-in)
+
+```sql
+-- Check your configuration
+SHOW wal_level;  -- Should be 'logical'
+
+-- Grant replication privilege
+ALTER USER your_user WITH REPLICATION;
+```
+
+### Usage
+
+```python
+import waveql
+import asyncio
+
+async def main():
+    # Connect to PostgreSQL
+    conn_str = "postgresql://user:pass@localhost:5432/mydb"
+    
+    # Option 1: Direct provider usage (recommended)
+    from waveql.cdc.postgres import PostgresCDCProvider
+    from waveql.adapters.sql import SQLAdapter
+    
+    adapter = SQLAdapter(host=conn_str)
+    provider = PostgresCDCProvider(
+        adapter=adapter,
+        connection_string=conn_str,
+        slot_name="my_cdc_slot",
+        output_plugin="test_decoding",  # or "wal2json"
+    )
+    
+    # Stream changes in real-time
+    async for change in provider.stream_changes("users"):
+        print(f"{change.operation}: {change.key}")
+        print(f"  Data: {change.data}")
+        if change.old_data:
+            print(f"  Old:  {change.old_data}")
+
+asyncio.run(main())
+```
+
+### One-Shot Change Retrieval
+
+```python
+# Peek at accumulated changes without consuming them
+changes = await provider.get_changes("users")
+for change in changes:
+    print(f"{change.operation}: {change.data}")
+```
+
+### Slot Management
+
+```python
+# Get slot info
+info = await provider.get_slot_info()
+print(f"Lag: {info['lag']}")
+
+# Drop slot when done (WARNING: loses unconsumed changes!)
+# Use force=True to kill active connections holding the slot
+await provider.drop_slot(force=True)
+```
+
+### Enabling Old Data (Before-Image)
+
+To capture the old values on UPDATE and DELETE, set `REPLICA IDENTITY FULL`:
+
+```sql
+ALTER TABLE your_table REPLICA IDENTITY FULL;
 ```
 
 ## Configuration
@@ -78,9 +171,18 @@ changes = await collect_changes(conn, "incident", duration_seconds=60)
 
 ## Adapter Support
 
-| Adapter | Mechanism | Notes |
-|:--------|:----------|:------|
-| **ServiceNow** | Polling (`sys_updated_on`) | Requires `sys_updated_on` field. Deletes may not be detected without Audit Log table access. |
-| **Jira** | Polling (`updated`) | Uses JQL `updated > last_sync`. |
-| **Salesforce** | Polling / Streaming API | Currently uses SOQL polling on `SystemModstamp`. |
+| Adapter | Mechanism | Latency | Delete Detection | Old Data |
+|:--------|:----------|:--------|:-----------------|:---------|
+| **PostgreSQL** | WAL Logical Replication | Milliseconds | ✅ Yes | ✅ Yes (with REPLICA IDENTITY FULL) |
+| **ServiceNow** | Polling (`sys_updated_on`) | Seconds | ⚠️ Limited | ❌ No |
+| **Jira** | Polling (`updated`) | Seconds | ⚠️ Limited | ❌ No |
+| **Salesforce** | Polling (`SystemModstamp`) | Seconds | ⚠️ Limited | ❌ No |
+
+## PostgreSQL CDC Best Practices
+
+1. **Use `wal2json`** if available - it provides JSON output that's easier to parse
+2. **Set `REPLICA IDENTITY FULL`** on tables where you need old values
+3. **Monitor slot lag** - unconsumed changes accumulate WAL files
+4. **Clean up slots** when no longer needed to avoid disk space issues
+5. **Use unique slot names** per consumer to avoid conflicts
 

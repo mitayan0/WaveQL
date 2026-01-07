@@ -4,18 +4,18 @@ Adapters are the pluggable components that teach WaveQL how to talk to a specifi
 
 ## Feature Matrix
 
-| Adapter | URI Scheme | Fetch & Pushdown | Insert | Update | Delete | Schema | Notes |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **ServiceNow** | `servicenow://` | ✅ Full (`sysparm_query`) | ✅ | ✅ | ✅ | ✅ Dynamic | Parallel fetching, CDC. |
-| **Salesforce** | `salesforce://` | ✅ Full (SOQL) | ✅ | ✅ | ✅ | ✅ Dynamic | Bulk API support. |
-| **Jira** | `jira://` | ✅ Full (JQL) | ✅ | ✅ | ✅ | ✅ Dynamic | Supports Projects, Issues, Users. |
-| **HubSpot** | `hubspot://` | ✅ Full (Search API) | ✅ | ✅ | ✅ | ✅ Dynamic | CRUD on Contacts, Companies, Deals. |
-| **Shopify** | `shopify://` | ✅ Partial | ✅ | ✅ | ✅ | ⚠️ Inferred | Pagination via Headers. |
-| **Zendesk** | `zendesk://` | ✅ Full (Search API) | ✅ | ✅ | ✅ | ⚠️ Inferred | Tickets, Users, Orgs. |
-| **Stripe** | `stripe://` | ✅ Full (Search/List) | ✅ | ✅ | ✅ | ⚠️ Inferred | Auto-switches Search/List APIs. |
-| **SQL Database**| `postgresql://`, etc.| ✅ Full (SQLAlchemy) | ✅ | ✅ | ✅ | ✅ Dynamic | Supports any SQLAlchemy dialect. |
-| **Cloud Storage**| `s3://`, `gs://` | ✅ Full (DuckDB) | ❌ | ❌ | ❌ | ✅ DuckDB | Parquet, CSV, JSON, **Delta**, **Iceberg**. |
-| **Google Sheets**| `google_sheets://` | ⚠️ Client-side | ✅ | ⚠️ Partial | ❌ | ⚠️ Inferred | Sheets as tables. |
+| Adapter | URI Scheme | Fetch & Pushdown | Aggregation | Insert | Update | Delete | Schema | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **ServiceNow** | `servicenow://` | ✅ Full (`sysparm_query`) | ✅ Server | ✅ | ✅ | ✅ | ✅ Dynamic | Parallel fetching, CDC. |
+| **Salesforce** | `salesforce://` | ✅ Full (SOQL) | ✅ Server | ✅ | ✅ | ✅ | ✅ Dynamic | Bulk API support. |
+| **Jira** | `jira://` | ✅ Full (JQL) | ✅ Client | ✅ | ✅ | ✅ | ✅ Dynamic | Supports Projects, Issues, Users. |
+| **HubSpot** | `hubspot://` | ✅ Full (Search API) | ✅ Client* | ✅ | ✅ | ✅ | ✅ Dynamic | *Smart COUNT uses API total. |
+| **Shopify** | `shopify://` | ✅ Partial | ✅ Client* | ✅ | ✅ | ✅ | ⚠️ Inferred | *Smart COUNT uses /count.json. |
+| **Zendesk** | `zendesk://` | ✅ Full (Search API) | ✅ Client* | ✅ | ✅ | ✅ | ⚠️ Inferred | *Smart COUNT uses API count. |
+| **Stripe** | `stripe://` | ✅ Full (Search/List) | ✅ Client* | ✅ | ✅ | ✅ | ⚠️ Inferred | *Smart COUNT uses total_count. |
+| **SQL Database**| `postgresql://`, etc.| ✅ Full (SQLAlchemy) | ✅ Server | ✅ | ✅ | ✅ | ✅ Dynamic | Supports any SQLAlchemy dialect. |
+| **Cloud Storage**| `s3://`, `gs://` | ✅ Full (DuckDB) | ✅ DuckDB | ❌ | ❌ | ❌ | ✅ DuckDB | Parquet, CSV, JSON, **Delta**, **Iceberg**. |
+| **Google Sheets**| `google_sheets://` | ⚠️ Client-side | ✅ Client | ✅ | ⚠️ Partial | ❌ | ⚠️ Inferred | Sheets as tables. |
 
 ---
 

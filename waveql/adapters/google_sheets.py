@@ -93,9 +93,11 @@ class GoogleSheetsAdapter(BaseAdapter):
     
     adapter_name = "google_sheets"
     supports_predicate_pushdown = False  # Filtering is done client-side
+    supports_aggregation = True  # Client-side aggregation support
     supports_insert = True
     supports_update = True
     supports_delete = False  # Too complex for sheet rows
+    supports_batch = True
     
     # OAuth2 scopes
     SCOPES = [
@@ -288,6 +290,10 @@ class GoogleSheetsAdapter(BaseAdapter):
             table = table.slice(offset)
         if limit:
             table = table.slice(0, limit)
+        
+        # Apply client-side aggregation if requested
+        if aggregates:
+            table = self._compute_client_side_aggregates(table, group_by, aggregates)
         
         return table
     

@@ -147,3 +147,75 @@ cursor.execute("UPDATE incident SET priority=1 WHERE number='INC001'")
 
 See the [Caching Documentation](caching.md) for complete details.
 
+## 8. Aggregation Performance
+
+WaveQL provides intelligent aggregation optimization across all adapters.
+
+### Smart COUNT Optimization
+
+For simple `COUNT(*)` queries, WaveQL uses API-native count mechanisms instead of fetching all records:
+
+| Adapter | Optimization | Performance |
+|---------|-------------|-------------|
+| **HubSpot** | Uses `total` field from Search API | 1 API call |
+| **Shopify** | Uses `/count.json` endpoint | 1 API call |
+| **Zendesk** | Uses `count` field from Search API | 1 API call |
+| **Stripe** | Uses `total_count` from Search API | 1 API call |
+| **ServiceNow** | Native `sysparm_count` pushdown | 1 API call |
+
+```sql
+-- This is FAST (uses Smart COUNT)
+SELECT COUNT(*) FROM hubspot.contacts
+
+-- This requires full fetch + client-side aggregation
+SELECT status, COUNT(*) FROM hubspot.contacts GROUP BY status
+```
+
+### Streaming vs Client-Side Aggregation
+
+For adapters without native aggregation APIs (HubSpot, Shopify, Zendesk, Stripe), WaveQL uses memory-efficient streaming aggregation:
+
+| Aggregation Type | Method | Memory Usage |
+|-----------------|--------|--------------|
+| Simple (no GROUP BY) | PyArrow compute | Low (streaming) |
+| GROUP BY | Pandas groupby | Moderate (loads to DataFrame) |
+
+### Performance Warnings
+
+WaveQL logs a warning when client-side aggregation processes more than 5,000 rows:
+
+```
+WARNING: [hubspot] Client-side aggregation on 12,345 rows.
+This may be slow. Consider using LIMIT, WHERE filters, or a more specific query.
+```
+
+### Best Practices for Aggregation
+
+1. **Use `WHERE` filters** to reduce data before aggregation
+2. **Prefer `COUNT(*)` over `COUNT(column)`** - enables Smart COUNT optimization
+3. **Avoid `GROUP BY` on large datasets** without filtering first
+4. **Use `LIMIT`** when exact counts aren't needed
+
+```sql
+-- Bad: Fetches all contacts, then groups
+SELECT status, COUNT(*) FROM contacts GROUP BY status
+
+-- Better: Filter first, then group
+SELECT status, COUNT(*) FROM contacts 
+WHERE created_at >= '2025-01-01' 
+GROUP BY status
+```
+
+### Approximate Aggregation (Advanced)
+
+For very large datasets where exact counts aren't critical, WaveQL supports sampling-based approximation:
+
+```python
+# In custom adapter code
+result = adapter._compute_approximate_aggregates(
+    table,
+    group_by=None,
+    aggregates=[Aggregate(func="COUNT", column="*", alias="approx_count")],
+    sample_size=10000  # Sample 10K rows from 1M
+)
+```

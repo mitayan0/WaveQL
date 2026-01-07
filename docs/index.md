@@ -57,11 +57,12 @@ Automatic schema discovery with native support for nested JSON structures.
 *   [Schema Evolution Detection](schema-inference.md#schema-evolution)
 *   [Dot-Notation Queries](schema-inference.md#usage-examples)
 
-### [Change Data Capture (CDC)](cdc.md)
+### [Change Data Capture (CDC)](cdc.md) ✨ NEW (PostgreSQL)
 Real-time streaming of data changes from your sources.
+*   **PostgreSQL WAL Streaming**: Zero-latency, push-based CDC.
+*   **SaaS Polling**: Interval-based change detection for ServiceNow/Salesforce.
 *   [Streaming Concepts](cdc.md#concepts)
 *   [Configuration](cdc.md#configuration)
-*   [Async Integration](cdc.md#async)
 
 ### [Performance Tuning](performance.md)
 Best practices for optimizing query performance and minimizing API usage.

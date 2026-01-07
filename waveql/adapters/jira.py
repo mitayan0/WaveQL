@@ -46,6 +46,7 @@ class JiraAdapter(BaseAdapter):
     
     adapter_name = "jira"
     supports_predicate_pushdown = True
+    supports_aggregation = True  # Client-side aggregation support
     supports_insert = True
     supports_update = True
     supports_delete = True
@@ -163,16 +164,19 @@ class JiraAdapter(BaseAdapter):
         aggregates: List[Any] = None,
     ) -> pa.Table:
         """Fetch data from Jira."""
-        if bool(group_by or aggregates):
-            raise NotImplementedError("JiraAdapter does not support aggregation pushdown")
-        
         table_name = self._extract_table_name(table)
         table_config = self._get_table_config(table_name)
         
         if table_config["supports_jql"]:
-            return self._fetch_with_jql(table_name, columns, predicates, limit, offset, order_by)
+            result_table = self._fetch_with_jql(table_name, columns, predicates, limit, offset, order_by)
         else:
-            return self._fetch_simple(table_name, table_config, columns, limit, offset)
+            result_table = self._fetch_simple(table_name, table_config, columns, limit, offset)
+        
+        # Apply client-side aggregation if requested
+        if aggregates:
+            result_table = self._compute_client_side_aggregates(result_table, group_by, aggregates)
+        
+        return result_table
     
     async def fetch_async(
         self,
@@ -186,16 +190,19 @@ class JiraAdapter(BaseAdapter):
         aggregates: List[Any] = None,
     ) -> pa.Table:
         """Fetch data from Jira (async)."""
-        if bool(group_by or aggregates):
-            raise NotImplementedError("JiraAdapter does not support aggregation pushdown")
-        
         table_name = self._extract_table_name(table)
         table_config = self._get_table_config(table_name)
         
         if table_config["supports_jql"]:
-            return await self._fetch_with_jql_async(table_name, columns, predicates, limit, offset, order_by)
+            result_table = await self._fetch_with_jql_async(table_name, columns, predicates, limit, offset, order_by)
         else:
-            return await self._fetch_simple_async(table_name, table_config, columns, limit, offset)
+            result_table = await self._fetch_simple_async(table_name, table_config, columns, limit, offset)
+        
+        # Apply client-side aggregation if requested
+        if aggregates:
+            result_table = self._compute_client_side_aggregates(result_table, group_by, aggregates)
+        
+        return result_table
     
     def _extract_table_name(self, table: str) -> str:
         """Extract table name from schema.table format."""
