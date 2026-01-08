@@ -1,0 +1,11 @@
+order_id,customer_name,product_id,quantity,order_date,status
+ORD-001,John Doe,P001,1,2024-01-15,Shipped
+ORD-002,Jane Smith,P002,3,2024-01-16,Delivered
+ORD-003,Bob Johnson,P003,2,2024-01-17,Processing
+ORD-004,Alice Brown,P005,1,2024-01-18,Shipped
+ORD-005,Charlie Wilson,P006,2,2024-01-19,Delivered
+ORD-006,Diana Lee,P001,1,2024-01-20,Processing
+ORD-007,Edward Clark,P004,1,2024-01-21,Cancelled
+ORD-008,Fiona Davis,P002,5,2024-01-22,Shipped
+ORD-009,George Miller,P007,4,2024-01-23,Delivered
+ORD-010,Hannah White,P008,2,2024-01-24,Processing

@@ -66,6 +66,9 @@ target-version = "py39"
 line-length = 100
 target-version = ["py39"]
 
+[project.scripts]
+waveql = "waveql.cli:main"
+
 [project.entry-points."sqlalchemy.dialects"]
 waveql = "waveql.sqlalchemy.dialect:WaveQLDialect"
 "waveql.servicenow" = "waveql.sqlalchemy.dialect:WaveQLDialect"

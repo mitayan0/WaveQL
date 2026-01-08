@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 from urllib.parse import urlparse
 
+from waveql.utils.wasm import is_wasm
 import pyarrow as pa
 
 if TYPE_CHECKING:
@@ -51,6 +52,7 @@ class BaseAdapter(ABC):
     supports_update: bool = False
     supports_delete: bool = False
     supports_batch: bool = False
+    supports_parallel_scan: bool = False # For large scale data fetching
     
     def __init__(
         self,
@@ -80,6 +82,10 @@ class BaseAdapter(ABC):
         
         # Lazy-loaded local session (when not using pool)
         self._local_session: Optional["requests.Session"] = None
+        
+        # Performance tracking (for Cost-Based Optimizer)
+        self.avg_latency_per_row: float = 0.001  # Default: 1ms per row
+        self._execution_history: List[Dict[str, Any]] = []
     
     def _extract_host(self, url: str) -> str:
         """Extract hostname from URL for pool keying."""
@@ -199,6 +205,11 @@ class BaseAdapter(ABC):
         Returns:
             PyArrow Table with results
         """
+        if is_wasm():
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"[{self.adapter_name}] Synchronous fetch used in Wasm/Pyodide environment. "
+                           "This may block the browser UI. Use fetch_async() instead.")
         pass
     
     @abstractmethod
@@ -223,6 +234,25 @@ class BaseAdapter(ABC):
     async def get_schema_async(self, table: str) -> List["ColumnInfo"]:
         """Discover schema for a table (async)."""
         raise NotImplementedError(f"{self.adapter_name} does not support get_schema_async")
+    
+    def get_parallel_plan(
+        self,
+        table: str,
+        predicates: List["Predicate"] = None,
+        n_partitions: int = 1,
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate a plan for parallel execution.
+        
+        Returns a list of partition definitions that can be passed to fetch()
+        by separate workers.
+        """
+        if not self.supports_parallel_scan:
+             return [{"partition_index": 0, "total_partitions": 1}]
+             
+        # Default behavior: Base adapter doesn't know how to split, so returns 1 partition
+        # regardless of requested n_partitions. Subclasses must override to support splitting.
+        return [{"partition_index": 0, "total_partitions": 1}]
     
     def insert(
         self,
@@ -408,6 +438,22 @@ class BaseAdapter(ABC):
         """
         return self._rate_limiter.execute_with_retry(request_func, *args, **kwargs)
 
+    def _update_performance_metrics(self, row_count: int, duration: float):
+        """Update latency metrics for the CBO."""
+        if row_count > 0:
+            latency = duration / row_count
+            # Simple moving average (alpha=0.2)
+            self.avg_latency_per_row = (0.8 * self.avg_latency_per_row) + (0.2 * latency)
+            
+            # Keep history for more complex analysis
+            self._execution_history.append({
+                "rows": row_count,
+                "duration": duration,
+                "latency_per_row": latency
+            })
+            if len(self._execution_history) > 100:
+                self._execution_history.pop(0)
+
     # Performance threshold for client-side aggregation warning
     CLIENT_SIDE_AGGREGATION_WARNING_THRESHOLD = 5000
     
@@ -512,7 +558,11 @@ class BaseAdapter(ABC):
                     # Count non-null values in column
                     if col in table.column_names:
                         column = table.column(col)
-                        result_data[alias] = [len(column) - pc.sum(pc.is_null(column)).as_py()]
+                        # Count non-nulls. pc.sum returns None on empty arrays
+                        nulls = pc.is_null(column)
+                        null_count_scalar = pc.sum(nulls).as_py()
+                        null_count = null_count_scalar if null_count_scalar is not None else 0
+                        result_data[alias] = [len(column) - null_count]
                     else:
                         result_data[alias] = [0]
             

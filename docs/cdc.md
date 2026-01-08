@@ -111,6 +111,44 @@ To capture the old values on UPDATE and DELETE, set `REPLICA IDENTITY FULL`:
 ALTER TABLE your_table REPLICA IDENTITY FULL;
 ```
 
+## State Persistence
+
+To ensure your CDC streams do not miss data during application restarts, WaveQL supports **persistent state backends**.
+
+### Basics
+
+The stream tracks its position using:
+1.  `last_sync`: Timestamp of the last processed event
+2.  `lsn`: Log Sequence Number (for Postgres/WAL)
+3.  `last_key`: Primary Key of the last record
+
+This state is periodically saved to a backend storage. When you restart the stream without providing a specific `since` date, it automatically resumes from the saved position.
+
+### SQLite Backend (Default)
+
+The simplest backend stores state in a local SQLite file (`.waveql_state.db`).
+
+```python
+# Automatic: stream resumes from last known position if 'since' is None
+async for change in conn.stream_changes("incident"):
+    print(change)
+```
+
+Configuration happens automatically in the `CDCStream`.
+
+### Custom State Backends
+
+You can configure different backends (e.g., Redis) using `create_state_backend`:
+
+```python
+from waveql.cdc.state import create_state_backend
+
+# Redis backend for distributed workers
+backend = create_state_backend("redis", host="localhost", port=6379)
+```
+
+*(Note: Custom backend injection into CDCStream is coming in v0.1.7)*
+
 ## Configuration
 
 You can customize the polling interval, batch size, and initial sync point using `CDCConfig`.

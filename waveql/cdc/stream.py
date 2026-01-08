@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Dict, List, Opti
 
 from waveql.cdc.models import Change, ChangeStream, ChangeType, CDCConfig
 from waveql.cdc.providers import get_cdc_provider, BaseCDCProvider
+from waveql.cdc.state import create_state_backend, StateBackend
 
 if TYPE_CHECKING:
     from waveql.connection import WaveQLConnection
@@ -63,6 +64,11 @@ class CDCStream:
         # Use parsed adapter name for provider lookup (even if adapter is from default)
         self._provider = get_cdc_provider(self._adapter_name, adapter) if adapter else None
         self._stream_state.adapter = self._adapter_name
+        
+        # Initialize state persistence
+        self.state_backend = create_state_backend("sqlite")
+        self._last_persist = 0.0
+        self._persist_interval = 1.0  # Seconds
     
     def __repr__(self) -> str:
         """String representation for debugging."""
@@ -75,6 +81,41 @@ class CDCStream:
             parts = table.split(".", 1)
             return parts[0].strip('"'), parts[1].strip('"')
         return "default", table.strip('"')
+    
+    def _persist_state(self, change: Change, force: bool = False) -> None:
+        """Persist current stream state to backend."""
+        import time
+        now = time.time()
+        if force or (now - self._last_persist >= self._persist_interval):
+            try:
+                self.state_backend.save_position(
+                    table=self._table_name,
+                    adapter=self._adapter_name,
+                    lsn=change.metadata.get("lsn"),
+                    last_key=str(change.key) if change.key else None,
+                    # offset could be in metadata
+                    metadata=change.metadata
+                )
+                self._last_persist = now
+            except Exception as e:
+                logger.warning(f"Failed to persist CDC state: {e}")
+
+    def _persist_final_state(self) -> None:
+        """Persist final state on stop/crash."""
+        if not self._stream_state.last_sync and not self._stream_state.lsn:
+            return
+            
+        try:
+            self.state_backend.save_position(
+                table=self._table_name,
+                adapter=self._adapter_name,
+                lsn=self._stream_state.lsn,
+                last_key=str(self._stream_state.last_key) if self._stream_state.last_key else None,
+                metadata=self._stream_state.metadata
+            )
+            logger.info(f"Persisted final CDC state for {self.table}")
+        except Exception as e:
+            logger.warning(f"Failed to persist final CDC state: {e}")
     
     async def get_changes(self, since: datetime = None) -> List[Change]:
         """
@@ -117,6 +158,16 @@ class CDCStream:
                 print(change)
             ```
         """
+        # Load persistent state if start point not specified
+        if not self.config.since:
+             try:
+                 pos = self.state_backend.get_position(self._table_name, self._adapter_name)
+                 if pos and pos.last_sync:
+                     self.config.since = pos.last_sync
+                     logger.info(f"Resuming CDC stream for {self.table} from {pos.last_sync}")
+             except Exception as e:
+                 logger.warning(f"Failed to load CDC state: {e}")
+
         if not self._provider:
             logger.warning("No CDC provider for adapter '%s'", self._adapter_name)
             return
@@ -132,6 +183,7 @@ class CDCStream:
                     break
                 
                 self._stream_state.update(change)
+                self._persist_state(change)
                 yield change
                 
         except asyncio.CancelledError:
@@ -141,6 +193,9 @@ class CDCStream:
             logger.error("Error in CDC stream for %s: %s", self.table, e)
             self._stream_state.errors.append(str(e))
             raise
+        finally:
+            self._persist_final_state()
+            self._running = False
     
     def stop(self) -> None:
         """Stop the stream."""

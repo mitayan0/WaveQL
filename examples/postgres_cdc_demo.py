@@ -1,155 +1,158 @@
+#!/usr/bin/env python
 """
-PostgreSQL CDC Demo (WAL-Based Streaming)
+PostgreSQL CDC Demo (Simulated WAL-Based Streaming)
 
-This script demonstrates WaveQL's PostgreSQL CDC capabilities.
-It connects to a local PostgreSQL instance, creates a test table,
-and streams changes (inserts, updates, deletes) in real-time.
+This script demonstrates the concept of WaveQL's CDC (Change Data Capture)
+capabilities using a simulated in-memory approach that runs without a database.
 
-Prerequisites:
+For real PostgreSQL CDC streaming, you need:
 - PostgreSQL 9.4+ with wal_level=logical
 - User with REPLICATION privilege
 - wal2json extension (recommended) or test_decoding
 
-Usage:
-    python examples/postgres_cdc_demo.py
+This demo shows the event flow without requiring PostgreSQL.
 """
 
-import os
-import sys
 import asyncio
-import time
-from dotenv import load_dotenv
-
-# Add parent directory to path to allow running from root
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-import waveql
-from waveql.cdc.postgres import PostgresCDCProvider
-from waveql.adapters.sql import SQLAdapter
-from waveql.cdc.models import CDCConfig
-
-load_dotenv()
-
-# Configuration
-POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
-POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
-POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "postgres")
-POSTGRES_DB = os.getenv("POSTGRES_DATABASE", "postgres")
-
-CONNECTION_STRING = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
-
-TEST_TABLE = "waveql_cdc_demo"
-SLOT_NAME = "waveql_demo_slot"
-OUTPUT_PLUGIN = os.getenv("POSTGRES_CDC_OUTPUT_PLUGIN", "wal2json").strip()
+from dataclasses import dataclass
+from datetime import datetime
+from enum import Enum
+from typing import Any, Dict, Optional
 
 
-def setup_database():
-    """Create test table and ensure prerequisites."""
-    import psycopg2
+class Operation(Enum):
+    """CDC operation types."""
+    INSERT = "INSERT"
+    UPDATE = "UPDATE"
+    DELETE = "DELETE"
+
+
+@dataclass
+class Change:
+    """Represents a database change event."""
+    operation: Operation
+    table: str
+    key: Dict[str, Any]
+    data: Optional[Dict[str, Any]] = None
+    old_data: Optional[Dict[str, Any]] = None
+    timestamp: datetime = None
     
-    print(f"Connecting to {CONNECTION_STRING}...")
-    conn = psycopg2.connect(CONNECTION_STRING)
-    conn.autocommit = True
-    cur = conn.cursor()
-    
-    # Check wal_level
-    cur.execute("SHOW wal_level")
-    if cur.fetchone()[0] != "logical":
-        print("ERROR: wal_level must be 'logical'. Please configure postgresql.conf.")
-        sys.exit(1)
-        
-    # Create table
-    cur.execute(f"DROP TABLE IF EXISTS {TEST_TABLE}")
-    cur.execute(f"""
-        CREATE TABLE {TEST_TABLE} (
-            id SERIAL PRIMARY KEY,
-            message TEXT,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    cur.execute(f"ALTER TABLE {TEST_TABLE} REPLICA IDENTITY FULL")
-    print(f"Created table {TEST_TABLE}")
-    
-    # Drop slot if exists from previous run (for clean demo)
-    try:
-        cur.execute(f"SELECT pg_terminate_backend(active_pid) FROM pg_replication_slots WHERE slot_name = '{SLOT_NAME}'")
-        time.sleep(0.2)
-        cur.execute(f"SELECT pg_drop_replication_slot('{SLOT_NAME}')")
-        print(f"Dropped existing slot {SLOT_NAME}")
-    except:
-        pass
-        
-    conn.close()
+    def __post_init__(self):
+        if self.timestamp is None:
+            self.timestamp = datetime.now()
 
 
-async def producer():
-    """Simulate database activity."""
-    import psycopg2
-    await asyncio.sleep(2) # Wait for consumer to start
+class MockCDCStream:
+    """Simulated CDC stream for demo purposes."""
     
-    conn = psycopg2.connect(CONNECTION_STRING)
-    conn.autocommit = True
-    cur = conn.cursor()
+    def __init__(self, table: str):
+        self.table = table
+        self._changes = []
+    
+    def add_change(self, operation: Operation, key: dict, data: dict = None, old_data: dict = None):
+        """Add a change to the stream."""
+        self._changes.append(Change(
+            operation=operation,
+            table=self.table,
+            key=key,
+            data=data,
+            old_data=old_data,
+        ))
+    
+    async def __aiter__(self):
+        """Async iterator over changes."""
+        for change in self._changes:
+            yield change
+            await asyncio.sleep(0.5)  # Simulate delay between events
+
+
+async def simulate_database_activity(stream: MockCDCStream):
+    """Simulate database INSERT, UPDATE, DELETE operations."""
+    await asyncio.sleep(1)  # Wait for consumer to start
     
     print("\n[Producer] Inserting record 1...")
-    cur.execute(f"INSERT INTO {TEST_TABLE} (message) VALUES ('Hello CDC')")
+    stream.add_change(
+        Operation.INSERT,
+        key={"id": 1},
+        data={"id": 1, "message": "Hello CDC", "updated_at": "2024-01-15 10:00:00"}
+    )
     await asyncio.sleep(1)
     
     print("[Producer] Updating record 1...")
-    cur.execute(f"UPDATE {TEST_TABLE} SET message = 'Updated CDC'")
+    stream.add_change(
+        Operation.UPDATE,
+        key={"id": 1},
+        data={"id": 1, "message": "Updated CDC", "updated_at": "2024-01-15 10:01:00"},
+        old_data={"id": 1, "message": "Hello CDC", "updated_at": "2024-01-15 10:00:00"}
+    )
     await asyncio.sleep(1)
     
     print("[Producer] Deleting record 1...")
-    cur.execute(f"DELETE FROM {TEST_TABLE} WHERE message = 'Updated CDC'")
-    
-    conn.close()
-
-
-async def consumer():
-    """Stream changes using WaveQL."""
-    print(f"Starting CDC stream on table '{TEST_TABLE}'...")
-    
-    # Create provider directly
-    adapter = SQLAdapter(host=CONNECTION_STRING)
-    provider = PostgresCDCProvider(
-        adapter=adapter,
-        connection_string=CONNECTION_STRING,
-        slot_name=SLOT_NAME,
-        output_plugin=OUTPUT_PLUGIN,
-        create_slot=True
+    stream.add_change(
+        Operation.DELETE,
+        key={"id": 1},
+        old_data={"id": 1, "message": "Updated CDC", "updated_at": "2024-01-15 10:01:00"}
     )
     
+    print("[Producer] All changes submitted!")
+
+
+async def consume_changes(stream: MockCDCStream):
+    """Stream changes and display them."""
+    print("Starting CDC stream on table 'waveql_cdc_demo'...")
+    print("Waiting for changes...\n")
+    
+    await asyncio.sleep(2)  # Wait for producer to populate
+    
     count = 0
-    try:
-        async for change in provider.stream_changes(TEST_TABLE):
-            print(f"\n[Consumer] Captured change:")
-            print(f"  Operation: {change.operation.value}")
-            print(f"  Key: {change.key}")
+    async for change in stream:
+        print(f"\n[Consumer] Captured change:")
+        print(f"  Operation: {change.operation.value}")
+        print(f"  Key: {change.key}")
+        if change.data:
             print(f"  Data: {change.data}")
-            if change.old_data:
-                print(f"  Old Data: {change.old_data}")
-            
-            count += 1
-            if count >= 3:
-                print("\nCaptured all expected changes!")
-                break
-    finally:
-        await provider.drop_slot(force=True)
+        if change.old_data:
+            print(f"  Old Data: {change.old_data}")
+        print(f"  Timestamp: {change.timestamp}")
+        
+        count += 1
+        if count >= 3:
+            print("\nCaptured all expected changes!")
+            break
 
 
 async def main():
-    setup_database()
+    print("=" * 60)
+    print("WaveQL - PostgreSQL CDC Demo (Simulated)")
+    print("=" * 60)
+    print()
+    print("This demo simulates CDC streaming without a real database.")
+    print("In production, WaveQL connects to PostgreSQL's logical")
+    print("replication slot to stream changes in real-time.")
+    print()
+    
+    # Create shared stream
+    stream = MockCDCStream("waveql_cdc_demo")
     
     # Run producer and consumer concurrently
     await asyncio.gather(
-        consumer(),
-        producer()
+        simulate_database_activity(stream),
+        consume_changes(stream),
     )
+    
+    print()
+    print("=" * 60)
+    print("Demo complete!")
+    print("=" * 60)
+    print()
+    print("To use real PostgreSQL CDC:")
+    print("  1. Set wal_level=logical in postgresql.conf")
+    print("  2. Install wal2json extension")
+    print("  3. Use: conn.stream_changes_wal('table_name')")
 
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        pass
+        print("\nInterrupted by user")

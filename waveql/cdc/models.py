@@ -105,6 +105,8 @@ class ChangeStream:
     adapter: str
     last_sync: Optional[datetime] = None
     last_key: Optional[Any] = None
+    lsn: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
     changes_processed: int = 0
     errors: List[str] = field(default_factory=list)
     
@@ -116,6 +118,8 @@ class ChangeStream:
         """Update stream state with a processed change."""
         self.last_sync = change.timestamp
         self.last_key = change.key
+        self.lsn = change.metadata.get("lsn")
+        self.metadata = change.metadata
         self.changes_processed += 1
     
     def to_dict(self) -> Dict[str, Any]:

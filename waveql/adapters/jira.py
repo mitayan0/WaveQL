@@ -4,13 +4,14 @@ Jira Adapter - Full support for Jira Cloud REST API
 Features:
 - JQL (Jira Query Language) predicate pushdown
 - Dynamic schema discovery from any project
-- Pagination handling with startAt/maxResults
+- Pagination handling with nextPageToken (new API)
 - Full CRUD operations for issues
 - Support for projects, users, and custom fields
 """
 
 from __future__ import annotations
 import json
+import logging
 from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 from urllib.parse import quote
 
@@ -24,6 +25,8 @@ from waveql.schema_cache import ColumnInfo
 
 if TYPE_CHECKING:
     from waveql.query_planner import Predicate
+
+logger = logging.getLogger(__name__)
 
 
 class JiraAdapter(BaseAdapter):
@@ -231,6 +234,15 @@ class JiraAdapter(BaseAdapter):
         # Using new /search/jql endpoint (the old /search was deprecated May 2025)
         url = f"{self._host}/rest/api/3/search/jql"
         
+        # Warn if offset is provided - new API doesn't support startAt
+        if offset is not None and offset > 0:
+            logger.warning(
+                "Jira's new search API uses token-based pagination. "
+                "The 'offset' parameter (%d) will be ignored. "
+                "To skip records, use JQL ordering with a WHERE clause instead.",
+                offset
+            )
+        
         # Build JQL query
         jql = self._build_jql(predicates, order_by)
         
@@ -249,6 +261,14 @@ class JiraAdapter(BaseAdapter):
             "Content-Type": "application/json",
             **self._get_auth_headers(),
         }
+        
+        # Log the JQL query for observability
+        logger.debug(
+            "Jira JQL query: table=%s, jql=%s, fields=%s",
+            table,
+            jql,
+            body.get("fields", "*"),
+        )
         
         # Fetch with pagination using nextPageToken
         all_issues = []

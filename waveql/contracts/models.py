@@ -69,11 +69,61 @@ class ViolationType(str, Enum):
     CONSTRAINT_VIOLATION = "constraint_violation"
 
 
+class RelationshipType(str, Enum):
+    """Types of table relationships."""
+    ONE_TO_ONE = "one_to_one"
+    ONE_TO_MANY = "one_to_many"
+    MANY_TO_ONE = "many_to_one"
+    MANY_TO_MANY = "many_to_many"
+
+
+# =============================================================================
+# Adaptive Model
+# =============================================================================
+
+class AdaptiveModel(BaseModel):
+    """
+    Base model that allows extra fields (Schema Drift Handling).
+    
+    This ensures that if a source API adds new fields that are not yet 
+    in our strict definition, the application does not crash.
+    """
+    if PYDANTIC_V2:
+        model_config = ConfigDict(extra='allow')
+    else:
+        class Config:
+            extra = 'allow'
+
+
+class RelationshipContract(AdaptiveModel):
+    """
+    Defines a relationship between tables (Foreign Keys).
+    
+    Attributes:
+        name: Relationship name
+        type: Connection type (one_to_one, many_to_one, etc.)
+        source_column: Local column name
+        target_table: Remote table name (schema-qualified)
+        target_column: Remote column name
+        description: Relationship context
+    """
+    name: str = Field(..., description="Relationship name")
+    type: RelationshipType = Field(default=RelationshipType.MANY_TO_ONE)
+    source_column: str = Field(..., description="Local column name")
+    target_table: str = Field(..., description="Remote table name")
+    target_column: str = Field(..., description="Remote column name")
+    description: str = Field(default="", description="Description of the relationship")
+
+    def to_llm_context(self) -> str:
+        """Generate context for this relationship."""
+        return f"{self.name}: {self.source_column} joins to {self.target_table}.{self.target_column} ({self.type.value})"
+
+
 # =============================================================================
 # Column Contract
 # =============================================================================
 
-class ColumnContract(BaseModel):
+class ColumnContract(AdaptiveModel):
     """
     Contract for a single column in a table.
     
@@ -87,12 +137,6 @@ class ColumnContract(BaseModel):
         default: Default value if missing
         aliases: Alternative names (for schema evolution)
     """
-    
-    if PYDANTIC_V2:
-        model_config = ConfigDict(extra='forbid')
-    else:
-        class Config:
-            extra = 'forbid'
     
     name: str = Field(..., description="Column name")
     type: ColumnType = Field(default="string", description="Data type")
@@ -124,7 +168,6 @@ class ColumnContract(BaseModel):
             return pa.list_(element_type)
         
         return ARROW_TYPE_MAP.get(self.type, pa.string())
-    
     def matches_arrow_type(self, arrow_type: pa.DataType) -> bool:
         """Check if an Arrow type is compatible with this contract."""
         expected = self.to_arrow_type()
@@ -152,6 +195,17 @@ class ColumnContract(BaseModel):
         
         return False
 
+    def to_llm_context(self) -> str:
+        """
+        Generate a prompt-ready description for this column.
+        
+        Example: "sys_id (string, required) [Primary Key]: Unique identifier"
+        """
+        nullable_str = "nullable" if self.nullable else "required"
+        pk_str = " [Primary Key]" if self.primary_key else ""
+        desc = f": {self.description}" if self.description else ""
+        return f"{self.name} ({self.type}, {nullable_str}){pk_str}{desc}"
+
 
 # Enable forward references for nested columns
 if PYDANTIC_V2:
@@ -162,7 +216,7 @@ if PYDANTIC_V2:
 # Data Contract
 # =============================================================================
 
-class DataContract(BaseModel):
+class DataContract(AdaptiveModel):
     """
     Complete data contract for a table.
     
@@ -186,12 +240,6 @@ class DataContract(BaseModel):
         )
     """
     
-    if PYDANTIC_V2:
-        model_config = ConfigDict(extra='forbid')
-    else:
-        class Config:
-            extra = 'forbid'
-    
     # Required fields
     table: str = Field(..., description="Table name")
     columns: List[ColumnContract] = Field(..., description="Column definitions")
@@ -200,6 +248,12 @@ class DataContract(BaseModel):
     adapter: Optional[str] = Field(default=None, description="Adapter name (servicenow, salesforce, etc.)")
     version: str = Field(default="1.0.0", description="Contract version")
     description: str = Field(default="", description="Table description")
+    
+    # Relationships
+    relationships: List[RelationshipContract] = Field(
+        default_factory=list, 
+        description="Relationships to other tables"
+    )
     
     # Validation options
     strict_columns: bool = Field(
@@ -397,6 +451,30 @@ class DataContract(BaseModel):
         parts = [f"{c.name}:{c.type}:{c.nullable}" for c in self.columns]
         schema_str = "|".join(sorted(parts))
         return hashlib.md5(schema_str.encode()).hexdigest()
+
+    def to_llm_context(self, include_sample: bool = False) -> str:
+        """
+        Generate a comprehensive prompt-ready description for AI agents.
+        
+        Synthesizes table metadata, column definitions, and relationships
+        into a format that LLMs can easily use for NL2SQL tasks.
+        """
+        context = [f"### Table: {self.table}"]
+        if self.adapter:
+            context.append(f"Source: {self.adapter}")
+        if self.description:
+            context.append(f"Description: {self.description}")
+        
+        context.append("\nColumns:")
+        for col in self.columns:
+            context.append(f"  - {col.to_llm_context()}")
+        
+        if self.relationships:
+            context.append("\nRelationships:")
+            for rel in self.relationships:
+                context.append(f"  - {rel.to_llm_context()}")
+        
+        return "\n".join(context)
 
 
 # =============================================================================

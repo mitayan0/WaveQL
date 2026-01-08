@@ -78,6 +78,11 @@ def mock_connection():
     real_duckdb = duckdb.connect()
     conn._duckdb = real_duckdb # Internal
     conn.duckdb = real_duckdb  # Property
+    conn._virtual_views = {}   # Required by cursor execution logic
+    
+    # Ensure view manager doesn't think every table is a local view
+    if hasattr(conn, "view_manager"):
+        conn.view_manager.exists.return_value = False
     
     return conn, users_adapter, incidents_adapter
 
@@ -96,6 +101,10 @@ def test_semi_join_pushdown(mock_connection):
     """
     
     # Execute
+    info = cursor._planner.parse(sql)
+    print(f"DEBUG: Aliases: {info.aliases}")
+    print(f"DEBUG: Predicates: {info.predicates}")
+    print(f"DEBUG: Joins: {info.joins}")
     try:
         cursor.execute(sql)
         results = cursor.fetchall()  # Might fail here or above

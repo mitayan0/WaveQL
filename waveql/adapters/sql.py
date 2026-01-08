@@ -36,8 +36,14 @@ class SQLAdapter(BaseAdapter):
         schema_cache=None,
         **kwargs
     ):
+
         super().__init__(host, auth_manager, schema_cache, **kwargs)
         
+        from waveql.utils.wasm import is_wasm
+        if is_wasm():
+            raise ImportError(f"SQLAdapter ({self.adapter_name}) is not supported in Wasm/Pyodide "
+                              "due to socket limitations. usage of standard database drivers is not possible.")
+
         # host argument is treated as the SQLAlchemy connection string
         self._connection_string = host
         self._engine: Optional[Engine] = None

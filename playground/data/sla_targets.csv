@@ -1,0 +1,6 @@
+priority,target_hours,escalation_hours,description
+1,4,2,Critical - P1 - Business Critical
+2,8,4,High - P2 - Major Impact
+3,24,12,Medium - P3 - Moderate Impact
+4,48,24,Low - P4 - Minor Impact
+5,72,48,Planning - P5 - No Impact

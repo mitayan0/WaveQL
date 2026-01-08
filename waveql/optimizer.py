@@ -780,6 +780,86 @@ class QueryOptimizer:
                 result.extend(pred.to_simple_predicates())
         
         return result
+    
+    def reorder_joins(
+        self,
+        tables: List[str],
+        predicates: Dict[str, List["Predicate"]],
+        connection: Any,
+    ) -> List[str]:
+        """
+        Reorder join tables based on CBO (Cost-Based Optimization).
+        
+        Prioritizes tables that are likely to be smaller (lower cardinality)
+        and faster to fetch, to serve as the driver for semi-join pushdown.
+        
+        Cost Formula:
+            Cost = EstimatedRows * AdapterLatency * SelectivityFactor
+            
+        Args:
+            tables: List of normalized table names (e.g. "servicenow.incident")
+            predicates: Dict mapping table name to list of predicates
+            connection: Connection object to access adapters and their history
+            
+        Returns:
+            Sorted list of table names
+        """
+        table_costs = []
+        
+        for table_name in tables:
+            # 1. Resolve Adapter
+            adapter_name = "default"
+            if "." in table_name:
+                adapter_name, _ = table_name.split(".", 1)
+                adapter_name = adapter_name.strip('"')
+            
+            adapter = connection.get_adapter(adapter_name)
+            
+            # Default metrics if adapter/history not found
+            # Default rows: 1000 (modest assumption)
+            # Default latency: 0.001 (1ms - optimistic)
+            latency_per_row = 0.001
+            avg_rows = 1000.0
+            
+            if adapter:
+                latency_per_row = getattr(adapter, "avg_latency_per_row", 0.001)
+                history = getattr(adapter, "_execution_history", [])
+                if history:
+                    # simplistic: average of last executions
+                    # If history is empty, use default
+                    total_rows = sum(h.get("rows", 0) for h in history)
+                    avg_rows = total_rows / len(history)
+            
+            # 2. Calculate Selectivity
+            # Start with 1.0 (100%)
+            selectivity = 1.0
+            table_preds = predicates.get(table_name, [])
+            
+            for pred in table_preds:
+                # Naive selectivity estimation
+                op = str(pred.operator).upper()
+                if op == "=":
+                    selectivity *= 0.1  # High selectivity (10% remain)
+                elif op in ("IN", "BETWEEN", "<", ">", "<=", ">="):
+                    selectivity *= 0.5  # Medium selectivity (50% remain)
+                else:
+                    selectivity *= 0.9  # Low selectivity (90% remain)
+            
+            # 3. Calculate Score (Estimated Duration)
+            estimated_rows = max(1, avg_rows * selectivity)
+            estimated_duration = estimated_rows * latency_per_row
+            
+            table_costs.append({
+                "table": table_name,
+                "score": estimated_duration,
+                "rows": estimated_rows,
+                "latency": latency_per_row
+            })
+            
+        # Sort by score ascending (cheaper/faster first)
+        sorted_costs = sorted(table_costs, key=lambda x: x["score"])
+        
+        return [item["table"] for item in sorted_costs]
 
 
 class SubqueryPushdownOptimizer:

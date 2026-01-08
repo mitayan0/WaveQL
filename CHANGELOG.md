@@ -5,6 +5,48 @@ All notable changes to WaveQL will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - v0.1.7
+
+### Added
+
+- **Semantic Layer Integration** 🚀
+  - **Virtual Views**: Define reusable SQL views over API data
+    - `VirtualView` and `VirtualViewRegistry` classes
+    - YAML/JSON file loading and serialization
+    - Automatic dependency ordering (topological sort)
+    - Schema namespacing support
+  - **Saved Queries**: Parameterized SQL templates
+    - `SavedQuery` and `SavedQueryRegistry` classes
+    - Type validation (str, int, float, bool, list, date)
+    - Default values and choices validation
+    - Auto-documentation generation
+  - **dbt Integration**: First-class dbt support
+    - `DbtManifest` parser for `manifest.json`
+    - `DbtModel` and `DbtSource` dataclasses
+    - Model lineage extraction (upstream/downstream)
+    - Automatic conversion to Virtual Views
+    - `conn.load_dbt_project()` convenience method
+
+- **Connection API Enhancements**
+  - `conn.register_views(registry)` - Register virtual views
+  - `conn.register_view(name, sql)` - Quick inline view
+  - `conn.execute_saved(query, **params)` - Execute parameterized query
+  - `conn.register_dbt_models(manifest)` - Load dbt models as views
+  - `conn.load_dbt_project(path)` - One-liner dbt project loading
+  - `conn.list_views()` - List registered views
+
+- **Reliability & Observability** 🛠️
+  - **SQL Query Logging**: New debug logging of exact native API calls (SOQL, JQL) sent to adapters
+  - **Async Fallback Pattern**: Added `asyncio` wrappers for sync-only adapters (REST) to support full `fetch_async` API
+  - **Connection Health Checks**: Implemented active validation (`HEAD` check logic) in connection pool before reuse
+  - **Enhanced Retry Logic**: Rate limit (429) handling with exponential backoff for REST adapter
+
+### Fixed
+
+- **Connection Pool**: Resolved race condition in `_total_connections` tracking under high concurrency
+- **Jira Adapter**: Added warning when `offset` is ignored due to token-based pagination API
+- **REST Adapter**: Fixed pagination parameters to respect `supports_filter` configuration
+
 ## [0.1.6] - 2026-01-07
 
 ### Added
