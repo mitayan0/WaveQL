@@ -161,6 +161,7 @@ Thumbs.db
 # Secrets (never commit these!)
 secrets.json
 credentials.json
+waveql.json
 .env.local
 .env.production
 .agent/

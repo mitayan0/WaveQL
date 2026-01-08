@@ -20,7 +20,7 @@ class SingerAdapter(BaseAdapter):
     
     def __init__(
         self, 
-        tap_command: str, 
+        tap_command: str = None, 
         config_path: str = None, 
         catalog_path: str = None,
         state_path: str = None,
@@ -35,6 +35,13 @@ class SingerAdapter(BaseAdapter):
             catalog_path: Path to catalog.json file (optional)
             state_path: Path to state.json file (optional, for incremental sync)
         """
+        # If tap_command not explicity provided, use host from parser
+        if not tap_command and kwargs.get("host"):
+            tap_command = kwargs.get("host")
+
+        if not tap_command:
+            raise ValueError("SingerAdapter requires a 'tap_command' or a host in the URI (e.g. singer://tap-github)")
+
         super().__init__(**kwargs)
         self.tap_command = tap_command
         self.config_path = config_path

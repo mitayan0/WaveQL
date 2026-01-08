@@ -91,7 +91,15 @@ class WaveQLConnection(ConnectionMixin):
         
         # If adapter specified, initialize it
         if adapter:
-            self._init_default_adapter(adapter, host, **kwargs)
+            # Pass auth credentials through to adapters that need direct access
+            adapter_kwargs = {
+                **kwargs,
+                "api_key": api_key,
+                "oauth_token": oauth_token,
+                "username": username,
+                "password": password,
+            }
+            self._init_default_adapter(adapter, host, **adapter_kwargs)
         
         # Initialize materialized view manager (lazy loaded)
         self._view_manager: Optional["MaterializedViewManager"] = None

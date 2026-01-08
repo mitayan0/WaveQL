@@ -1,0 +1,92 @@
+# Docker Compose for Cloud Storage Emulators
+# Usage: docker compose -f docker-compose.test.yml up -d
+#
+# This file starts local emulators for:
+# - MinIO (S3-compatible)
+# - Fake GCS Server (Google Cloud Storage)
+# - Azurite (Azure Blob Storage)
+#
+# These emulators are completely isolated from real cloud services.
+# Your production code will use real endpoints while tests use these local ones.
+
+services:
+  # ============================================================
+  # MinIO - S3-Compatible Object Storage
+  # ============================================================
+  # Console: http://localhost:9001 (login: minioadmin/minioadmin)
+  # API: http://localhost:9000
+  minio:
+    image: minio/minio:latest
+    container_name: waveql-minio
+    ports:
+      - "9000:9000" # S3 API
+      - "9001:9001" # Web Console
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: [ "CMD", "mc", "ready", "local" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ============================================================
+  # Fake GCS Server - Google Cloud Storage Emulator
+  # ============================================================
+  # API: http://localhost:4443
+  fake-gcs:
+    image: fsouza/fake-gcs-server:latest
+    container_name: waveql-fake-gcs
+    ports:
+      - "4443:4443"
+    command:
+      - "-scheme"
+      - "http"
+      - "-port"
+      - "4443"
+      - "-external-url"
+      - "http://localhost:4443"
+    volumes:
+      - gcs_data:/data
+
+  # ============================================================
+  # Azurite - Azure Blob Storage Emulator
+  # ============================================================
+  # Blob API: http://localhost:10000
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    container_name: waveql-azurite
+    ports:
+      - "10000:10000" # Blob service
+      - "10001:10001" # Queue service
+      - "10002:10002" # Table service
+    command: azurite-blob --blobHost 0.0.0.0 --loose --skipApiVersionCheck
+    volumes:
+      - azurite_data:/data
+
+  # ============================================================
+  # LocalStack - Full AWS Emulation (Optional, more comprehensive)
+  # ============================================================
+  # API: http://localhost:4566
+  localstack:
+    image: localstack/localstack:latest
+    container_name: waveql-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3
+      - DEBUG=0
+      - PERSISTENCE=1
+    volumes:
+      - localstack_data:/var/lib/localstack
+      - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  minio_data:
+  gcs_data:
+  azurite_data:
+  localstack_data:

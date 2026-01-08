@@ -23,7 +23,7 @@ Thank you for your interest in contributing to WaveQL! This document provides gu
    pip install -e ".[dev]"
    # Or manually:
    pip install -e .
-   pip install pytest pytest-asyncio responses respx black isort mypy
+   pip install pytest pytest-cov pytest-asyncio responses respx black ruff
    ```
 
 4. **Run tests**
@@ -60,9 +60,7 @@ Thank you for your interest in contributing to WaveQL! This document provides gu
 
 ### Python Style
 
-- Follow [PEP 8](https://pep8.org/)
-- Use `black` for formatting: `black waveql/`
-- Use `isort` for imports: `isort waveql/`
+- Use [Ruff](https://docs.astral.sh/ruff/) for linting and formatting: `ruff check waveql/` and `ruff format waveql/`
 - Maximum line length: 100 characters
 
 ### Type Hints
@@ -168,37 +166,39 @@ def test_fetch_data(adapter):
 waveql/
 ├── __init__.py           # Package exports
 ├── connection.py         # WaveQLConnection
+├── async_connection.py   # AsyncWaveQLConnection
 ├── cursor.py             # WaveQLCursor
-├── async_cursor.py       # AsyncCursor
-├── query_planner.py      # SQL parsing
-├── schema_cache.py       # Schema caching
-├── exceptions.py         # Custom exceptions
-├── adapters/
-│   ├── base.py           # BaseAdapter class
+├── async_cursor.py       # AsyncWaveQLCursor
+├── query_planner.py      # SQL Parser & Planner
+├── optimizer.py          # Query Optimizer
+├── schema_cache.py       # Schema Caching
+├── exceptions.py         # Custom Exceptions
+├── cache.py              # Query Result Cache
+├── streaming.py          # RecordBatch Streaming
+├── ai.py                 # Vector Search & AI Functions
+├── webhooks.py           # Webhook Listener
+├── observability.py      # Tracing & Metrics
+├── adapters/             # Data Source Adapters
+│   ├── base.py
 │   ├── servicenow.py
 │   ├── salesforce.py
 │   ├── jira.py
-│   ├── rest_adapter.py
-│   ├── file_adapter.py
+│   ├── rest_adapter.py    # Generic REST
+│   ├── file_adapter.py    # CSV/Parquet/Excel
+│   ├── sql.py             # PostgreSQL/MySQL
+│   ├── cloud_storage.py   # S3/GCS/Iceberg
+│   ├── google_sheets.py
+│   ├── singer.py          # Singer Taps
 │   └── registry.py
-├── auth/
-│   └── manager.py        # AuthManager
-├── utils/
-│   ├── connection_pool.py
-│   ├── rate_limiter.py
-│   └── streaming.py
-└── sqlalchemy/
-    └── dialect.py
+├── auth/                 # Authentication Managers
+├── cdc/                  # Change Data Capture
+├── contracts/            # Data Contracts & Validation
+├── materialized_view/    # Materialized View Engine
+├── semantic/             # Semantic Layer (Views, dbt)
+└── utils/                # Utilities (Connection Pool, etc.)
 ```
 
-## Release Process
 
-1. Update version in `pyproject.toml`
-2. Update `CHANGELOG.md`
-3. Create a git tag: `git tag v1.0.0`
-4. Push: `git push origin main --tags`
-5. Build: `python -m build`
-6. Upload: `twine upload dist/*`
 
 ## Code of Conduct
 

@@ -59,13 +59,34 @@ class ConnectionMixin:
                 "params": {}
             }
         
-        # Parse adapter://[user:pass@]host[:port][?params] format
-        parsed = urlparse(conn_str)
+        # Manually extract scheme for URIs with underscores (e.g., google_sheets://)
+        # Python's urlparse doesn't recognize schemes with underscores (RFC 3986)
+        scheme = ""
+        rest = conn_str
+        if "://" in conn_str:
+            scheme, rest = conn_str.split("://", 1)
+            # Reconstruct with a temporary valid scheme for urlparse
+            temp_uri = f"temp://{rest}"
+        else:
+            temp_uri = conn_str
+        
+        # Parse using urlparse with the temporary scheme
+        parsed = urlparse(temp_uri)
         params = {k: v[0] if len(v) == 1 else v for k, v in parse_qs(parsed.query).items()}
         
+        # Determine host: 
+        # - For simple IDs without credentials (no @ in rest), use original string to preserve case
+        # - urlparse lowercases hostnames, but IDs like spreadsheet IDs may be case-sensitive
+        if parsed.username or parsed.password or parsed.port:
+            # Complex URI with credentials/port - use parsed hostname
+            host = parsed.hostname or parsed.netloc
+        else:
+            # Simple URI - preserve original case by using rest (minus query string)
+            host = rest.split("?")[0] if rest else parsed.netloc or parsed.path.lstrip("/")
+        
         result = {
-            "adapter": parsed.scheme,
-            "host": parsed.hostname or parsed.path,  # hostname excludes credentials
+            "adapter": scheme or parsed.scheme,       # Use manually extracted scheme
+            "host": host,                             # hostname excludes credentials
             "username": parsed.username,              # Extracted from user:pass@host
             "password": parsed.password,              # Extracted from user:pass@host
             "port": parsed.port,                      # Extracted from host:port
