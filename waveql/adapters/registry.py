@@ -139,6 +139,13 @@ def _register_builtin_adapters():
     except ImportError:
         pass
 
+    try:
+        from waveql.adapters.singer import SingerAdapter
+        register_adapter("singer", SingerAdapter)
+        register_adapter("tap", SingerAdapter)
+    except ImportError:
+        pass
+
 
 _register_builtin_adapters()
 

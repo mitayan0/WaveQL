@@ -20,7 +20,7 @@
 
 **WaveQL** is the **Universal SQL Connector** for your modern data stack.
 
-It unifies **SaaS APIs** (ServiceNow, Salesforce, Jira), **Databases** (Postgres, MySQL), and **Files** (CSV, Excel/XLSX, Parquet) under a single, standard SQL interface.
+It unifies **SaaS APIs** (ServiceNow, Salesforce, Hubspot, Zendesk), **Databases** (Postgres, MySQL), and **Files** (CSV, Parquet, Excel) under a single, standard SQL interface.
 
 Instead of writing custom scripts for every data source, use WaveQL to:
 *   **Query** live API data using SQL.
@@ -31,7 +31,7 @@ Built for data engineers and developers, it translates your SQL queries into opt
 
 ## Why WaveQL?
 
-*   **Universal Adapter System**: Connect to ServiceNow, Salesforce, Jira, Google Sheets, and Cloud Storage with a unified interface.
+*   **Universal Adapter System**: Connect to ServiceNow, Salesforce, HubSpot, Shopify, Zendesk, Stripe, Singer Taps, Google Sheets, Cloud Storage (S3/GCS), and Databases.
 *   **Intelligent Query Pushdown**: We don't just fetch all data. `WHERE` clauses are translated into native API filters (e.g., JQL, SOQL) for maximum performance.
 *   **Universal Aggregation Support**: Native server-side aggregation for ServiceNow/Salesforce/SQL, and optimized client-side aggregation (Streaming & Smart COUNT) for HubSpot, Shopify, and more.
 *   **High-Scale Streaming**: Memory-efficient RecordBatch streaming with backpressure for million-row datasets.
@@ -87,7 +87,8 @@ for row in cursor:
     print(f"[{row.number}] {row.short_description}")
 
 # Or get a Pandas DataFrame instantly
-df = cursor.fetchall().to_df()
+
+df = cursor.to_df()
 print(df.head())
 ```
 
@@ -106,9 +107,9 @@ async def main():
         await cursor.execute("SELECT count(*) FROM incident")
         print(await cursor.fetchone())
         
-        # 2. Stream Changes (CDC)
-        async for change in conn.stream_changes("incident"):
-            print(f"Update on {change.key}: {change.operation}")
+        # 2. Async Streams
+        async for batch in cursor.stream_batches("SELECT * FROM incident"):
+            print(f"Received batch of {len(batch)} records")
 
 asyncio.run(main())
 ```
@@ -180,8 +181,11 @@ conn = waveql.connect("servicenow://...", cache_config=config)
 | **Shopify** | `shopify://` | Orders/Products, **Smart COUNT**, CRUD |
 | **Zendesk** | `zendesk://` | Ticket Search, **Smart COUNT**, CRUD |
 | **Stripe** | `stripe://` | Search/List API, **Smart COUNT**, CRUD |
+| **Singer Taps** | `singer://`, `tap://` | **300+ Taps** (GitHub, Slack, etc.) |
 | **SQL DB** | `postgresql://` | Full SQL Passthrough via SQLAlchemy |
 | **Cloud Storage** | `s3://`, `gs://` | Parquet/CSV, **Delta Lake**, **Iceberg** |
+| **Generic REST**| `rest://`, `http://` | Configurable endpoints, JSON, Auth |
+| **Files** | `file://` | CSV, Parquet, Excel, JSON |
 | **Google Sheets** | `google_sheets://` | Spreadsheets as Tables, Read/Write |
 
 ## SQL Syntax Support
@@ -222,15 +226,7 @@ auth = AuthManager(
 conn = waveql.connect("salesforce://login.salesforce.com", auth_manager=auth)
 ```
 
-## Contributing
 
-We love contributions! Whether it's a new adapter, a bug fix, or a docs improvement, please join us.
-
-1.  Fork the repository
-2.  Create your feature branch (`git checkout -b feature/amazing-feature`)
-3.  Commit your changes (`git commit -m 'Add some amazing feature'`)
-4.  Push to the branch (`git push origin feature/amazing-feature`)
-5.  Open a Pull Request
 
 ## License
 

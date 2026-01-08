@@ -69,40 +69,44 @@ WaveQL includes integration tests in the `playground/` directory. To run them, c
 # .env file
 
 # ServiceNow
-SERVICENOW_HOST=dev12345.service-now.com
-SERVICENOW_USER=admin
-SERVICENOW_PASSWORD=your_password
+SN_HOST=dev12345.service-now.com
+SN_USERNAME=admin
+SN_PASSWORD=your_password
 
 # Salesforce
-SALESFORCE_HOST=your-dev-ed.my.salesforce.com
-SALESFORCE_USER=email@example.com
-SALESFORCE_PASSWORD=password
-SALESFORCE_TOKEN=security_token
-SALESFORCE_CONSUMER_KEY=your_connected_app_key
-SALESFORCE_CONSUMER_SECRET=your_connected_app_secret
+SF_HOST=https://your-domain.my.salesforce.com
+SF_USERNAME=email@example.com
+SF_PASSWORD=password
+SF_SECURITY_TOKEN=security_token
+SF_CLIENT_ID=your_connected_app_key
+SF_CLIENT_SECRET=your_connected_app_secret
+# OR use OAuth tokens:
+# SF_ACCESS_TOKEN=your_access_token
+# SF_REFRESH_TOKEN=your_refresh_token
 
 # Jira
 JIRA_HOST=your-domain.atlassian.net
-JIRA_USER=email@example.com
-JIRA_TOKEN=your_api_token
+JIRA_USERNAME=email@example.com
+JIRA_API_TOKEN=your_api_token
 
 # HubSpot
-HUBSPOT_ACCESS_TOKEN=your_private_app_token
+HUBSPOT_API_KEY=your_private_app_token
 
 # Shopify
-SHOPIFY_SHOP_URL=your-shop.myshopify.com
+SHOPIFY_STORE=your-shop.myshopify.com
 SHOPIFY_ACCESS_TOKEN=your_admin_api_token
 
 # Zendesk
 ZENDESK_SUBDOMAIN=your-subdomain
-ZENDESK_EMAIL=email@example.com/token
-ZENDESK_TOKEN=your_api_token
+ZENDESK_EMAIL=email@example.com
+ZENDESK_API_TOKEN=your_api_token
 
-# Stripe
+# Stripe (use test mode key!)
 STRIPE_API_KEY=sk_test_...
 
 # Google Sheets
-GOOGLE_APPLICATION_CREDENTIALS=path/to/service_account.json
+GOOGLE_SHEETS_SPREADSHEET_ID=1PT73EFLcCy5tbpKQf1vYpfUGBvQJg2h0jsN7PdT9zno
+GOOGLE_SHEETS_CREDENTIALS_FILE=path/to/service_account.json
 
 # AWS S3 (Cloud Storage)
 AWS_ACCESS_KEY_ID=your_access_key
@@ -110,7 +114,68 @@ AWS_SECRET_ACCESS_KEY=your_secret_key
 # AWS_ENDPOINT_URL=http://localhost:9000  # For MinIO
 ```
 
-## 3. Public REST APIs (No Credentials)
+## 3. Running Integration Tests
+
+Integration tests are located in the `playground/` directory. Each test file validates a specific adapter against a live API.
+
+### Available Test Suites
+
+| Test File | Adapter | Tests Covered |
+|-----------|---------|---------------|
+| `test_sn_full.py` | ServiceNow | SELECT, WHERE, LIMIT/OFFSET, Schema, CRUD, CDC, Materialized Views |
+| `test_salesforce_full.py` | Salesforce | SOQL pushdown, OAuth, Bulk API, Aggregations, CRUD |
+| `test_jira_full.py` | Jira | JQL pushdown, Issue CRUD, Pagination, Attachments |
+| `test_hubspot_full.py` | HubSpot | CRM Search API, Smart COUNT, Contacts/Companies/Deals |
+| `test_shopify_full.py` | Shopify | Orders/Products/Customers, Smart COUNT, CRUD |
+| `test_zendesk_full.py` | Zendesk | Tickets/Users/Orgs, Search API, CRUD |
+| `test_stripe_full.py` | Stripe | Charges/Customers/Invoices, Search vs List API |
+| `test_google_sheets_full.py` | Google Sheets | Sheet as Table, Client-Side Filtering, INSERT |
+| `test_cloud_storage_full.py` | Cloud Storage | S3 (MinIO), GCS, Azure Blob, Local Files |
+| `test_files_full.py` | File Adapter | CSV, Parquet, Excel (Local) |
+| `test_public_api_full.py` | Generic REST | Public APIs (no auth needed) |
+
+### Running Tests
+
+```bash
+# Activate virtual environment
+.venv\Scripts\activate  # Windows
+source .venv/bin/activate  # macOS/Linux
+
+# Run a specific adapter test
+python playground/test_hubspot_full.py
+python playground/test_salesforce_full.py
+python playground/test_cloud_storage_full.py
+
+# Run unit tests (no credentials needed)
+pytest tests/ -v
+
+# Run all tests with coverage
+pytest tests/ --cov=waveql --cov-report=html
+```
+
+### Test Output
+
+Each test suite produces a summary showing pass/fail status:
+
+```
+============================================================
+  TEST SUMMARY
+============================================================
+  [PASS]  Basic SELECT
+  [PASS]  Column Selection
+  [PASS]  Predicate Pushdown
+  [PASS]  Schema Discovery
+  [PASS]  CRUD Operations
+  ...
+
+  Result: 14/14 tests passed
+
+  ** ALL HUBSPOT TESTS PASSED! **
+```
+
+---
+
+## 4. Public REST APIs (No Credentials)
 
 For testing the **Generic REST Adapter** without signup, you can use these public APIs:
 
@@ -126,19 +191,38 @@ For testing the **Generic REST Adapter** without signup, you can use these publi
 
 ---
 
-## 4. Cloud Storage & Data Lakes
+## 5. Cloud Storage & Data Lakes
 
-### 🪣 Amazon S3 / Cloud Storage
-For testing S3, GCS, or Azure Blob without spending money:
-*   **MinIO (Recommended)**: Run a local S3-compatible server.
+### 🪣 Local Emulator Suite (Recommended)
+
+WaveQL provides a Docker Compose setup to run local emulators for AWS S3, Google Cloud Storage, and Azure Blob Storage. This allows you to run the full cloud storage validation suite (`test_cloud_storage_full.py`) without real cloud credentials.
+
+1.  **Start the Emulators**:
     ```bash
-    docker run -p 9000:9000 -p 9001:9001 minio/minio server /data --console-address ":9001"
+    docker-compose -f docker-compose.test.yml up -d
     ```
-    *   User: `minioadmin`, Password: `minioadmin`
-    *   URI: `s3://bucket/` with `endpoint_url=http://localhost:9000`
-*   **Public Datasets**: Use open datasets (ReadOnly).
-    *   `s3://coiled-datasets/` (AWS Open Data)
-*   **AWS Free Tier**: Standard S3 has a 5GB free tier for 12 months.
+    This starts:
+    *   **MinIO** (S3 compatible) at `http://localhost:9000`
+    *   **Fake GCS Server** at `http://localhost:4443`
+    *   **Azurite** (Azure Blob) at `http://localhost:10000`
+
+2.  **Run the Tests**:
+    The test script automatically configures the environment to use these local emulators.
+    ```bash
+    python playground/test_cloud_storage_full.py
+    ```
+
+3.  **Stop Emulators**:
+    ```bash
+    docker-compose -f docker-compose.test.yml down
+    ```
+
+### ☁️ Real Cloud Testing
+You can also test against real cloud providers by setting credentials in your `.env` file. Referece `playground/test_cloud_storage_full.py` for required variables.
+
+*   **AWS S3**: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
+*   **GCS**: `GOOGLE_APPLICATION_CREDENTIALS` (path to JSON)
+*   **Azure**: `AZURE_STORAGE_CONNECTION_STRING`
 
 ### 📊 Google Sheets
 1.  **Service Account (Recommended)**:
@@ -169,3 +253,19 @@ For testing S3, GCS, or Azure Blob without spending money:
 2.  **Free Cloud Tiers**:
     *   **Supabase / Neon** (Free Postgres)
     *   **PlanetScale** (MySQL-compatible)
+
+### 🎤 Singer Taps
+1.  **Install a Tap**:
+    ```bash
+    pip install tap-github
+    ```
+2.  **Configuration**:
+    Create a `config_github.json` with your access token.
+3.  **Connection**:
+    ```python
+    conn = waveql.connect(
+        "singer://tap-github",
+        config_path="config_github.json"
+    )
+    ```
+

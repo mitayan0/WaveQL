@@ -82,6 +82,9 @@ class CloudCredentials:
     # Use anonymous access (for public buckets)
     anonymous: bool = False
     
+    # SSL/TLS settings (for S3-compatible storage without SSL)
+    use_ssl: bool = True
+    
     @classmethod
     def from_env(cls) -> "CloudCredentials":
         """Create credentials from environment variables."""
@@ -144,6 +147,7 @@ class CloudCredentials:
             azure_connection_string=self.azure_connection_string or other.azure_connection_string,
             azure_sas_token=self.azure_sas_token or other.azure_sas_token,
             anonymous=self.anonymous or other.anonymous,
+            use_ssl=self.use_ssl and other.use_ssl,  # Only use SSL if both have it enabled
         )
 
 
@@ -309,9 +313,19 @@ class CloudStorageAdapter(BaseAdapter):
         if creds.aws_region:
             self._duckdb.execute(f"SET s3_region = '{creds.aws_region}'")
         if creds.aws_endpoint:
-            self._duckdb.execute(f"SET s3_endpoint = '{creds.aws_endpoint}'")
+            # Extract host:port from endpoint URL (remove http:// or https:// prefix)
+            endpoint = creds.aws_endpoint
+            if endpoint.startswith("http://"):
+                endpoint = endpoint[7:]  # Remove "http://"
+            elif endpoint.startswith("https://"):
+                endpoint = endpoint[8:]  # Remove "https://"
+            self._duckdb.execute(f"SET s3_endpoint = '{endpoint}'")
             # For S3-compatible storage, often need path-style URLs
             self._duckdb.execute("SET s3_url_style = 'path'")
+        
+        # Configure SSL (default is true, set to false for local emulators)
+        if not creds.use_ssl:
+            self._duckdb.execute("SET s3_use_ssl = false")
     
     def _configure_gcs(self, creds: CloudCredentials):
         """Configure GCS credentials in DuckDB."""
@@ -441,8 +455,12 @@ class CloudStorageAdapter(BaseAdapter):
             return f"iceberg_scan('{uri}')"
         elif self._format == TableFormat.PARQUET:
             # Support glob patterns for multiple files
-            if "*" in uri or uri.endswith("/"):
-                return f"read_parquet('{uri}/*.parquet')"
+            if "*" in uri:
+                # URI already contains a glob pattern, use it directly
+                return f"read_parquet('{uri}')"
+            elif uri.endswith("/"):
+                # Directory, add glob pattern for parquet files
+                return f"read_parquet('{uri}*.parquet')"
             return f"read_parquet('{uri}')"
         elif self._format == TableFormat.CSV:
             return f"read_csv_auto('{uri}')"

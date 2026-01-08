@@ -116,7 +116,25 @@ class GoogleSheetsAdapter(BaseAdapter):
         super().__init__(host, auth_manager, schema_cache, **kwargs)
         
         self._spreadsheet_id = self._extract_spreadsheet_id(host)
-        self._credentials = credentials or GoogleSheetsCredentials.from_env()
+        
+        if credentials:
+            self._credentials = credentials
+        else:
+            # Check kwargs for connection string parameters
+            service_account = kwargs.get("credentials_file") or kwargs.get("service_account_json")
+            oauth_creds = kwargs.get("oauth_credentials_file")
+            api_key = kwargs.get("api_key")
+            
+            # If any explicit credentials provided in kwargs, use them
+            if service_account or oauth_creds or api_key:
+                self._credentials = GoogleSheetsCredentials(
+                    service_account_json=service_account,
+                    oauth_credentials_file=oauth_creds,
+                    api_key=api_key
+                )
+            else:
+                self._credentials = GoogleSheetsCredentials.from_env()
+        
         self._service = None
         self._spreadsheet_metadata = None
         
@@ -162,7 +180,8 @@ class GoogleSheetsAdapter(BaseAdapter):
                     scopes=self.SCOPES
                 )
             except Exception as e:
-                logger.warning(f"Failed to load service account: {e}")
+                logger.error(f"Failed to load service account from {self._credentials.service_account_json}: {e}")
+                raise ConfigurationError(f"Failed to load service account credentials: {e}")
         
         # Try OAuth2 credentials
         if not creds and self._credentials.oauth_credentials_file:
@@ -262,10 +281,23 @@ class GoogleSheetsAdapter(BaseAdapter):
             # Pad row if it's shorter than headers
             padded_row = row + [None] * (len(headers) - len(row))
             for i, header in enumerate(headers):
-                column_data[header].append(padded_row[i] if i < len(padded_row) else None)
+                value = padded_row[i] if i < len(padded_row) else None
+                # Convert empty strings to None to avoid PyArrow type inference issues
+                if value == "":
+                    value = None
+                column_data[header].append(value)
         
-        # Convert to Arrow table
-        table = pa.table(column_data)
+        # Convert to Arrow table with explicit string type for mixed columns
+        # This handles cases where a column might have mixed types (e.g., numbers and empty strings)
+        try:
+            table = pa.table(column_data)
+        except pa.ArrowInvalid:
+            # Fallback: Convert all values to strings to avoid type conflicts
+            string_column_data = {
+                h: [str(v) if v is not None else None for v in vals]
+                for h, vals in column_data.items()
+            }
+            table = pa.table(string_column_data)
         
         # Apply client-side filtering
         if predicates:

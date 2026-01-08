@@ -16,6 +16,7 @@ Adapters are the pluggable components that teach WaveQL how to talk to a specifi
 | **SQL Database**| `postgresql://`, etc.| ✅ Full (SQLAlchemy) | ✅ Server | ✅ | ✅ | ✅ | ✅ Dynamic | Supports any SQLAlchemy dialect. |
 | **Cloud Storage**| `s3://`, `gs://` | ✅ Full (DuckDB) | ✅ DuckDB | ❌ | ❌ | ❌ | ✅ DuckDB | Parquet, CSV, JSON, **Delta**, **Iceberg**. Native Async. |
 | **REST** | `http://` | ✅ Param Pushdown | ❌ | ✅ | ✅ | ✅ | ✅ Config | Configurable endpoints. Async fallback. |
+| **Singer Taps** | `singer://` | ✅ Local Stream | ❌ | ❌ | ❌ | ❌ | ✅ JSON | Wraps Singer.io taps. |
 | **Google Sheets**| `google_sheets://` | ⚠️ Client-side | ✅ Client | ✅ | ⚠️ Partial | ❌ | ⚠️ Inferred | Sheets as tables. |
 
 ---
@@ -175,6 +176,21 @@ Connects to any standard REST API with configurable endpoints.
 SELECT id, name FROM users WHERE role = 'admin'
 ```
 
+## 12. Singer Taps Adapter
+Wrapper for the Singer.io ecosystem (open-source connectors).
+
+*   **URI**: `singer://tap-github` (Use tap command as host)
+*   **Capabilities**:
+    *   **Access**: Connect to 300+ existing Singer taps (Salesforce, Zendesk, Postgres, etc.).
+    *   **Streams**: Maps Singer "streams" to tables.
+    *   **Filtering**: Client-side mostly, unless tap supports catalog selection.
+
+**Example:**
+```python
+conn = waveql.connect("singer://tap-github", config_path="config.json")
+cursor.execute("SELECT * FROM issues LIMIT 10")
+```
+
 ## Developing Custom Adapters
 
 Implement `BaseAdapter` to support new APIs.
@@ -187,5 +203,8 @@ class MyAdapter(BaseAdapter):
         # Implementation
         pass
 
+
 register_adapter("myservice", MyAdapter)
 ```
+
+See [Testing & Developer Credentials](testing.md) for details on running integration tests.
