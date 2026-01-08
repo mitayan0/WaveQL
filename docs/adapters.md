@@ -14,7 +14,8 @@ Adapters are the pluggable components that teach WaveQL how to talk to a specifi
 | **Zendesk** | `zendesk://` | ✅ Full (Search API) | ✅ Client* | ✅ | ✅ | ✅ | ⚠️ Inferred | *Smart COUNT uses API count. |
 | **Stripe** | `stripe://` | ✅ Full (Search/List) | ✅ Client* | ✅ | ✅ | ✅ | ⚠️ Inferred | *Smart COUNT uses total_count. |
 | **SQL Database**| `postgresql://`, etc.| ✅ Full (SQLAlchemy) | ✅ Server | ✅ | ✅ | ✅ | ✅ Dynamic | Supports any SQLAlchemy dialect. |
-| **Cloud Storage**| `s3://`, `gs://` | ✅ Full (DuckDB) | ✅ DuckDB | ❌ | ❌ | ❌ | ✅ DuckDB | Parquet, CSV, JSON, **Delta**, **Iceberg**. |
+| **Cloud Storage**| `s3://`, `gs://` | ✅ Full (DuckDB) | ✅ DuckDB | ❌ | ❌ | ❌ | ✅ DuckDB | Parquet, CSV, JSON, **Delta**, **Iceberg**. Native Async. |
+| **REST** | `http://` | ✅ Param Pushdown | ❌ | ✅ | ✅ | ✅ | ✅ Config | Configurable endpoints. Async fallback. |
 | **Google Sheets**| `google_sheets://` | ⚠️ Client-side | ✅ Client | ✅ | ⚠️ Partial | ❌ | ⚠️ Inferred | Sheets as tables. |
 
 ---
@@ -157,6 +158,21 @@ Query spreadsheets as tables.
 **Example:**
 ```sql
 SELECT Name, Email FROM Sheet1 WHERE Status = 'Active'
+```
+
+## 11. Generic REST Adapter
+Connects to any standard REST API with configurable endpoints.
+
+*   **URI**: `http://api.example.com` or `https://api.example.com`
+*   **Capabilities**:
+    *   **Configurable Endpoints**: Map tables to URL paths (e.g., `users` -> `/api/v1/users`).
+    *   **Predicate Pushdown**: JSON-based or Query-param based filtering.
+    *   **Async Support**: Full async wrapper support.
+    *   **Rate Limiting**: Automatic backoff on HTTP 429.
+
+**Example:**
+```sql
+SELECT id, name FROM users WHERE role = 'admin'
 ```
 
 ## Developing Custom Adapters

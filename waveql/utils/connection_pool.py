@@ -149,6 +149,42 @@ class SyncConnectionPool:
         
         return PooledConnection(session=session, host=host)
     
+    def _is_connection_healthy(self, connection: PooledConnection, host: str) -> bool:
+        """
+        Check if a pooled connection is still usable.
+        
+        Performs a lightweight check to detect broken/stale connections:
+        - Checks if the session has been closed
+        - Optionally performs a HEAD request (only if host is reachable)
+        
+        Note: This is a best-effort check. Some connection issues may only
+        be detected when actually making a request.
+        
+        Args:
+            connection: The pooled connection to check
+            host: The host this connection is for
+            
+        Returns:
+            True if the connection appears healthy, False otherwise
+        """
+        try:
+            session = connection.session
+            
+            # Basic check: session should have adapters mounted
+            if not session.adapters:
+                return False
+            
+            # Check if connection is too old (stale)
+            # Using a more conservative threshold than max_idle_time
+            stale_threshold = self._config.max_idle_time * 0.8
+            if connection.is_expired(stale_threshold):
+                return False
+            
+            return True
+            
+        except Exception:
+            return False
+    
     @contextmanager
     def get_session(self, host: str):
         """
@@ -168,13 +204,14 @@ class SyncConnectionPool:
         try:
             connection = pool.get_nowait()
             
-            # Check if connection is expired
-            if connection.is_expired(self._config.max_idle_time):
+            # Check if connection is expired or unhealthy
+            if connection.is_expired(self._config.max_idle_time) or not self._is_connection_healthy(connection, host):
                 try:
                     connection.session.close()
                 except Exception:
                     pass
-                self._total_connections -= 1
+                with self._global_lock:
+                    self._total_connections -= 1
                 connection = None
         except Empty:
             pass
@@ -197,13 +234,14 @@ class SyncConnectionPool:
             if connection and not self._closed:
                 try:
                     pool.put_nowait(connection)
-                except:
+                except Exception:
                     # Pool is full, close the connection
                     try:
                         connection.session.close()
                     except Exception:
                         pass
-                    self._total_connections -= 1
+                    with self._global_lock:
+                        self._total_connections -= 1
     
     def get_session_direct(self, host: str) -> requests.Session:
         """
@@ -218,14 +256,16 @@ class SyncConnectionPool:
         
         try:
             connection = pool.get_nowait()
-            if connection.is_expired(self._config.max_idle_time):
+            # Check if connection is expired or unhealthy
+            if connection.is_expired(self._config.max_idle_time) or not self._is_connection_healthy(connection, host):
                 try:
                     connection.session.close()
                 except Exception:
                     pass
-                self._total_connections -= 1
-                connection = self._create_session(host)
-                self._total_connections += 1
+                with self._global_lock:
+                    self._total_connections -= 1
+                    connection = self._create_session(host)
+                    self._total_connections += 1
         except Empty:
             with self._global_lock:
                 if self._total_connections < self._config.max_total_connections:
@@ -251,12 +291,13 @@ class SyncConnectionPool:
         
         try:
             pool.put_nowait(connection)
-        except:
+        except Exception:
             try:
                 session.close()
             except Exception:
                 pass
-            self._total_connections -= 1
+            with self._global_lock:
+                self._total_connections -= 1
     
     def close(self):
         """Close all connections in the pool."""

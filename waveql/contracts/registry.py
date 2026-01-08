@@ -270,6 +270,77 @@ class ContractRegistry:
         
         path.write_text(content, encoding="utf-8")
         logger.info("Saved contract to %s", path)
+
+    def export_to_dbt(self, path: Union[str, Path]) -> None:
+        """
+        Export all registered contracts to a dbt sources.yml file.
+        
+        Maps WaveQL adapters to dbt sources, and tables/columns to their 
+        dbt definitions. automatically includes 'unique' and 'not_null' 
+        tests based on contract constraints.
+        
+        Args:
+            path: Output file path (e.g. "models/sources.yml")
+        """
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Group contracts by adapter
+        sources = defaultdict(list)
+        for contract in self.get_all():
+            adapter = contract.adapter or "default"
+            sources[adapter].append(contract)
+            
+        dbt_sources = []
+        for adapter_name, contracts in sources.items():
+            tables = []
+            for contract in contracts:
+                columns = []
+                for col in contract.columns:
+                    col_def = {
+                        "name": col.name,
+                        "description": col.description or "",
+                    }
+                    
+                    # Map constraints to dbt tests
+                    tests = []
+                    if not col.nullable:
+                        if "not_null" not in tests:
+                            tests.append("not_null")
+                    if col.primary_key:
+                        if "unique" not in tests:
+                            tests.append("unique")
+                        if "not_null" not in tests:
+                            tests.append("not_null")
+                            
+                    if tests:
+                        col_def["tests"] = tests
+                        
+                    columns.append(col_def)
+                
+                tables.append({
+                    "name": contract.table,
+                    "description": contract.description or "",
+                    "columns": columns
+                })
+            
+            dbt_sources.append({
+                "name": adapter_name,
+                "tables": tables
+            })
+            
+        dbt_output = {
+            "version": 2,
+            "sources": dbt_sources
+        }
+        
+        try:
+            import yaml
+            content = yaml.dump(dbt_output, default_flow_style=False, sort_keys=False)
+            path.write_text(content, encoding="utf-8")
+            logger.info("Exported dbt sources to %s", path)
+        except ImportError:
+            raise ImportError("PyYAML is required for dbt export: pip install pyyaml")
     
     # =========================================================================
     # Validation

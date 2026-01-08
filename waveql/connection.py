@@ -85,6 +85,9 @@ class WaveQLConnection(ConnectionMixin):
         
         # Registered adapters for this connection
         self._adapters: Dict[str, BaseAdapter] = {}
+
+        # Registered virtual views (name -> sql) for query expansion
+        self._virtual_views: Dict[str, str] = {}
         
         # If adapter specified, initialize it
         if adapter:
@@ -160,6 +163,71 @@ class WaveQLConnection(ConnectionMixin):
         adapter.set_auth_manager(self._auth_manager)
         adapter.set_schema_cache(self._schema_cache)
         self._adapters[name] = adapter
+    
+    def discover_relationships(self, threshold: float = 0.8) -> List["RelationshipContract"]:
+        """
+        Automatically discover potential relationships across all registered adapters.
+        
+        Uses naming heuristics, data types, and semantic metadata to suggest 
+        Foreign Key links across different data sources.
+        
+        Args:
+            threshold: Confidence threshold for suggestions (0.0 to 1.0)
+            
+        Returns:
+            List of RelationshipContract suggestions
+        """
+        from waveql.contracts.models import RelationshipContract
+        suggestions = []
+        
+        # 1. Ask adapters for their known relationships
+        for adapter_name, adapter in self._adapters.items():
+            # Check if adapter has specialized discovery logic (not just the base one)
+            if hasattr(adapter, 'discover_relationships') and callable(adapter.discover_relationships):
+                try:
+                    # Avoid infinite recursion if adapter calls connection.discover_relationships
+                    # (Though adapters shouldn't do that)
+                    rels = adapter.discover_relationships()
+                    if rels:
+                        suggestions.extend(rels)
+                except Exception as e:
+                    logger.debug(f"Adapter {adapter_name} discovery skipped: {e}")
+
+        # 2. Heuristic discovery across schemas
+        all_schemas = {}
+        for name, adapter in self._adapters.items():
+            try:
+                for table in adapter.list_tables():
+                    schema = adapter.get_schema(table)
+                    all_schemas[f"{name}.{table}"] = schema
+            except Exception:
+                continue
+        
+        # Compare columns across all table pairs
+        tables = list(all_schemas.keys())
+        for i in range(len(tables)):
+            for j in range(i + 1, len(tables)):
+                t1, t2 = tables[i], tables[j]
+                s1, s2 = all_schemas[t1], all_schemas[t2]
+                
+                for col1 in s1:
+                    for col2 in s2:
+                        # Logic 1: Exact Name & Type Match (e.g. email -> email)
+                        # Fix: use data_type instead of type
+                        if col1.name.lower() == col2.name.lower() and col1.data_type == col2.data_type:
+                            if col1.name.lower() in ("email", "id", "sys_id", "guid", "uuid"):
+                                suggestions.append(RelationshipContract(
+                                    name=f"Auto:{t1}.{col1.name}->{t2}.{col2.name}",
+                                    source_column=f"{t1}.{col1.name}",
+                                    target_table=t2,
+                                    target_column=col2.name,
+                                    description="Automated link via exact name and type match"
+                                ))
+                        
+                        # Logic 2: Semantic Pointer (e.g. reporter_id -> email)
+                        # TO-DO: Integrate LLM-based semantic matching here
+                
+        return suggestions
     
     def get_adapter(self, name: str = "default") -> Optional["BaseAdapter"]:
         """Get a registered adapter by name."""
@@ -466,6 +534,8 @@ class WaveQLConnection(ConnectionMixin):
         """Access underlying DuckDB connection."""
         return self._duckdb
     
+
+
     @property
     def schema_cache(self) -> SchemaCache:
         """Access schema cache."""
@@ -477,6 +547,209 @@ class WaveQLConnection(ConnectionMixin):
         return self._auth_manager
     
     # =========================================================================
+    # Semantic Integrations (Virtual Views, Saved Queries, dbt)
+    # =========================================================================
+    
+    def register_views(self, registry: "VirtualViewRegistry") -> int:
+        """
+        Register virtual views from a registry.
+        
+        Views are created in DuckDB as SQL views in dependency order.
+        
+        Args:
+            registry: VirtualViewRegistry containing view definitions
+            
+        Returns:
+            Number of views registered
+            
+        Example:
+            ```python
+            from waveql.semantic import VirtualViewRegistry
+            
+            registry = VirtualViewRegistry.from_file("views.yaml")
+            conn.register_views(registry)
+            cursor.execute("SELECT * FROM my_view")
+            ```
+        """
+        from waveql.semantic.views import VirtualViewRegistry
+        
+        count = 0
+        for view in registry.get_ordered_views():
+            # Store logic for cursor expansion
+            self._virtual_views[view.name] = view.sql
+            try:
+                self._duckdb.execute(f"CREATE OR REPLACE VIEW {view.name} AS {view.sql}")
+                logger.debug("Registered view in DuckDB: %s", view.name)
+            except Exception as e:
+                # This is expected if the view depends on adapter tables not yet registered in DuckDB.
+                # The Cursor will handle expansion.
+                logger.debug("Deferred DuckDB registration for view %s: %s", view.name, e)
+            
+            count += 1
+        
+        logger.info("Registered %d virtual views", count)
+        return count
+    
+    def register_view(self, name: str, sql: str, replace: bool = True) -> None:
+        """
+        Register a single virtual view.
+        
+        Args:
+            name: View name (used as table name in queries)
+            sql: SQL query defining the view
+            replace: If True, replace existing view with same name
+            
+        Example:
+            ```python
+            conn.register_view(
+                "active_incidents",
+                "SELECT * FROM incident WHERE active = true"
+            )
+            cursor.execute("SELECT COUNT(*) FROM active_incidents")
+            ```
+        """
+        keyword = "CREATE OR REPLACE" if replace else "CREATE"
+        
+        # Store for expansion
+        self._virtual_views[name] = sql
+        
+        try:
+            self._duckdb.execute(f"{keyword} VIEW {name} AS {sql}")
+            logger.debug("Registered view in DuckDB: %s", name)
+        except Exception as e:
+            logger.debug("Deferred DuckDB registration for view %s: %s", name, e)
+    
+    def unregister_view(self, name: str, if_exists: bool = True) -> bool:
+        """
+        Remove a virtual view.
+        
+        Args:
+            name: View name to remove
+            if_exists: If True, don't error if view doesn't exist
+            
+        Returns:
+            True if view was dropped
+        """
+        keyword = "IF EXISTS" if if_exists else ""
+        
+        # Remove from local registry
+        if name in self._virtual_views:
+            del self._virtual_views[name]
+            
+        try:
+            self._duckdb.execute(f"DROP VIEW {keyword} {name}")
+            logger.debug("Dropped view: %s", name)
+            return True
+        except Exception:
+            return False
+    
+    def list_views(self) -> list:
+        """
+        List all registered virtual views.
+        
+        Returns:
+            List of view names
+        """
+        result = self._duckdb.execute(
+            "SELECT table_name FROM information_schema.tables WHERE table_type = 'VIEW'"
+        ).fetchall()
+        return [row[0] for row in result]
+    
+    def execute_saved(self, query: "SavedQuery", **params) -> "WaveQLCursor":
+        """
+        Execute a saved query with parameters.
+        
+        Args:
+            query: SavedQuery object or query name (if registry loaded)
+            **params: Parameter values for the query
+            
+        Returns:
+            WaveQLCursor with results
+            
+        Example:
+            ```python
+            from waveql.semantic import SavedQuery
+            
+            query = SavedQuery(
+                name="incidents_by_priority",
+                sql="SELECT * FROM incident WHERE priority <= :max_priority",
+                parameters={"max_priority": {"type": "int", "default": 2}}
+            )
+            
+            cursor = conn.execute_saved(query, max_priority=1)
+            results = cursor.fetchall()
+            ```
+        """
+        from waveql.semantic.saved_queries import SavedQuery
+        
+        rendered_sql = query.render(**params)
+        cursor = self.cursor()
+        cursor.execute(rendered_sql)
+        return cursor
+    
+    def register_dbt_models(
+        self,
+        manifest: "DbtManifest",
+        include_ephemeral: bool = True,
+        exclude_tags: list = None
+    ) -> int:
+        """
+        Register dbt models as virtual views.
+        
+        Parses the dbt manifest.json and creates DuckDB views for each model
+        using the compiled SQL.
+        
+        Args:
+            manifest: DbtManifest object loaded from manifest.json
+            include_ephemeral: Include ephemeral models
+            exclude_tags: List of dbt tags to exclude
+            
+        Returns:
+            Number of models registered
+            
+        Example:
+            ```python
+            from waveql.semantic import DbtManifest
+            
+            manifest = DbtManifest.from_file("target/manifest.json")
+            conn.register_dbt_models(manifest)
+            
+            # Now query dbt models directly
+            cursor.execute("SELECT * FROM stg_customers")
+            ```
+        """
+        from waveql.semantic.dbt import DbtManifest
+        
+        registry = manifest.to_view_registry(
+            include_ephemeral=include_ephemeral,
+            exclude_tags=exclude_tags or []
+        )
+        return self.register_views(registry)
+    
+    def load_dbt_project(self, project_path: str) -> int:
+        """
+        Load dbt models from a project directory.
+        
+        Convenience method that loads manifest.json from target/ and registers all models.
+        
+        Args:
+            project_path: Path to dbt project root (containing target/manifest.json)
+            
+        Returns:
+            Number of models registered
+            
+        Example:
+            ```python
+            conn.load_dbt_project("/path/to/my_dbt_project")
+            cursor.execute("SELECT * FROM stg_orders WHERE status = 'shipped'")
+            ```
+        """
+        from waveql.semantic.dbt import DbtManifest
+        
+        manifest = DbtManifest.from_project(project_path)
+        return self.register_dbt_models(manifest)
+    
+    # =========================================================================
     # Query Result Cache
     # =========================================================================
     
@@ -484,6 +757,11 @@ class WaveQLConnection(ConnectionMixin):
     def cache(self) -> QueryCache:
         """Access query result cache."""
         return self._cache
+    
+    @property
+    def cache_enabled(self) -> bool:
+        """Check if caching is enabled globally."""
+        return self._cache.config.enabled
     
     @property
     def cache_stats(self) -> CacheStats:

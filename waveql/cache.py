@@ -100,6 +100,10 @@ class CacheConfig:
             raise ValueError("max_entries must be at least 1")
         if self.max_memory_mb < 1:
             raise ValueError("max_memory_mb must be at least 1")
+        # Validate per-adapter TTL values
+        for adapter, ttl in self.adapter_ttl.items():
+            if ttl < 0:
+                raise ValueError(f"TTL for adapter '{adapter}' must be non-negative, got {ttl}")
     
     def get_ttl_for_adapter(self, adapter_name: str) -> float:
         """Get the TTL for a specific adapter."""

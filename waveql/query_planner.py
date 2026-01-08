@@ -76,6 +76,7 @@ class QueryInfo:
     compound_predicates: List[Any] = field(default_factory=list)  # CompoundPredicate objects
     subqueries: List[Any] = field(default_factory=list)  # SubqueryInfo objects
     has_complex_or: bool = False  # True if query has OR predicates
+    is_hybrid: bool = False  # True if /*+ HYBRID */ hint is present
 
     def __repr__(self) -> str:
         """String representation for debugging."""
@@ -103,6 +104,71 @@ class QueryPlanner:
     - INSERT, UPDATE, DELETE parsing
     """
     
+    def expand_views(self, sql: str, views: Dict[str, str]) -> str:
+        """
+        Recursively expand virtual views in SQL by replacing table references
+        with the view definition as a subquery.
+        
+        Args:
+            sql: The SQL query to expand
+            views: Dictionary mapping view names to their SQL definitions
+            
+        Returns:
+            SQL string with views expanded
+        """
+        if not views:
+            return sql
+            
+        try:
+            # Parse
+            expression = sqlglot.parse_one(sql, read="duckdb")
+            
+            # Track expanded views to prevent infinite loops (registry should handle cycles, but safety first)
+            iteration = 0
+            max_iterations = 20 
+            
+            while iteration < max_iterations:
+                found_view = False
+                
+                # Find all tables currently in the expression
+                # We collect them first to avoid modification issues during iteration
+                tables_to_replace = []
+                for table in expression.find_all(exp.Table):
+                    # Check if table name matches a view
+                    clean_name = table.name
+                    if clean_name in views:
+                        tables_to_replace.append((table, clean_name))
+                
+                if not tables_to_replace:
+                    break
+                    
+                for table, view_name in tables_to_replace:
+                    view_sql = views[view_name]
+                    try:
+                        view_expr = sqlglot.parse_one(view_sql, read="duckdb")
+                        
+                        # Replace with subquery: (VIEW_SQL) AS view_name
+                        subquery = exp.Subquery(
+                            this=view_expr,
+                            alias=exp.TableAlias(this=exp.Identifier(this=view_name, quoted=False))
+                        )
+                        
+                        table.replace(subquery)
+                        found_view = True
+                    except Exception as e:
+                        logger.warning(f"Failed to expand view {view_name}: {e}")
+                
+                if not found_view:
+                    break
+                    
+                iteration += 1
+                
+            return expression.sql(dialect="duckdb")
+            
+        except Exception as e:
+            logger.debug("Failed to expand views logic: %s", e)
+            return sql
+
     def parse(self, sql: str) -> QueryInfo:
         """Parse SQL query and extract components."""
         sql = sql.strip()
@@ -112,6 +178,9 @@ class QueryPlanner:
         except Exception as e:
             logger.debug(f"sqlglot failed to parse query, falling back to RAW: {e}")
             return QueryInfo(operation="RAW", raw_sql=sql)
+
+        # 0. Detect Hints
+        is_hybrid = "/*+ HYBRID */" in sql.upper()
 
         # 1. Handle EXPLAIN
         # Some versions of sqlglot use exp.Explain, others use exp.Command
@@ -132,18 +201,27 @@ class QueryPlanner:
             inner_sql = inner_expression.this if isinstance(inner_expression, exp.Literal) else inner_expression.sql() 
             info = self.parse(inner_sql)
             info.is_explain = True
+            info.is_hybrid = is_hybrid or info.is_hybrid
             return info
 
         if isinstance(expression, exp.Select):
-            return self._parse_select(expression, sql)
+            info = self._parse_select(expression, sql)
+            info.is_hybrid = is_hybrid
+            return info
         elif isinstance(expression, exp.Insert):
-            return self._parse_insert(expression, sql)
+            info = self._parse_insert(expression, sql)
+            info.is_hybrid = is_hybrid
+            return info
         elif isinstance(expression, exp.Update):
-            return self._parse_update(expression, sql)
+            info = self._parse_update(expression, sql)
+            info.is_hybrid = is_hybrid
+            return info
         elif isinstance(expression, exp.Delete):
-            return self._parse_delete(expression, sql)
+            info = self._parse_delete(expression, sql)
+            info.is_hybrid = is_hybrid
+            return info
         
-        return QueryInfo(operation="RAW", raw_sql=sql)
+        return QueryInfo(operation="RAW", raw_sql=sql, is_hybrid=is_hybrid)
 
     def _parse_select(self, expression: exp.Select, raw_sql: str) -> QueryInfo:
         """Extract information from a SELECT statement."""

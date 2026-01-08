@@ -37,7 +37,9 @@ graph TD
 
 ### 1. Connection Manager (`WaveQLConnection`)
 The entry point for the library. It creates standard DB-API cursors and manages the lifecycle of the underlying `httpx.Client`. It handles:
-*   Connection Pooling (via `httpx` and `anyio`)
+*   **Connection Pooling** (via `requests` for sync, `httpx` for async)
+    *   **Health Checks**: Active validation (`HEAD` probes or stale checks) before recycling connections to avoid "Connection Reset" errors.
+    *   **Concurrency Control**: Thread-safe pool with global locks to prevent socket exhaustion.
 *   Authentication State Management
 *   Adapter Factory pattern resolution
 
@@ -104,3 +106,16 @@ The CDC module (`waveql.cdc`) allows for real-time data streaming.
 1.  **Providers**: Each adapter implements a CDC Provider (e.g., `ServiceNowCDCProvider`) that defines the strategy for detecting changes (Polling vs Webhooks).
 2.  **State Management**: The stream maintains a cursor (timestamp or ID) to ensure reliable resumption after restart.
 3.  **Unified Interface**: The `CDCStream` normalizes events into a standard `Change` object (Insert/Update/Delete) regardless of the source API.
+
+### 6. WebAssembly (Wasm) Architecture
+
+WaveQL is designed to run in browser environments via **Pyodide** (CPython complied to WebAssembly). This allows you to run SQL-on-API logic directly in a frontend React/Vue app without a backend server.
+
+**Key Adaptations:**
+*   **Networking**: Standard `socket`-based libraries (`psycopg2`, `requests` sync) do not work in the browser sandbox. WaveQL detects this via `waveql.utils.wasm.is_wasm()`.
+*   **Async-First**: In Wasm, the main thread cannot block. WaveQL adapters automatically route traffic through `httpx` with a Pyodide-compatible transport (e.g., `pyodide-http` or `fetch` wrappers).
+*   **Execution**:
+    *   **Browser**: `fetch_async()` executes via JavaScript `fetch` API.
+    *   **Result**: Data is returned as Arrow Tables, which are efficiently accessible by JavaScript visualization libraries (e.g., Observable Plot, Deck.gl).
+
+This architecture enables "Serverless SQL" — querying Salesforce/ServiceNow directly from the client's browser.

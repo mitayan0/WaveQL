@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
 import re
 import uuid
 import logging
+import time
 import pyarrow as pa
 
 from waveql.exceptions import QueryError
@@ -126,6 +127,10 @@ class WaveQLCursor:
         """
         if self._closed:
             raise QueryError("Cursor is closed")
+            
+        # Expand virtual views if any (Macro expansion)
+        if self._connection._virtual_views:
+            operation = self._planner.expand_views(operation, self._connection._virtual_views)
         
         # Parse query to extract table, predicates, etc.
         query_info = self._planner.parse(operation)
@@ -137,7 +142,10 @@ class WaveQLCursor:
         adapter = self._resolve_adapter(query_info)
         
         try:
-            if query_info.joins:
+            if query_info.is_hybrid:
+                # Handle hybrid query (Historical + Live)
+                self._result = self._execute_hybrid(query_info, operation, parameters)
+            elif query_info.joins:
                 # Handle virtual join across adapters
                 self._result = self._execute_virtual_join(query_info, operation, parameters)
             elif adapter:
@@ -196,14 +204,33 @@ class WaveQLCursor:
         if not table_name:
             return table_name
         
+        # Normalize: Remove alias if any and strip quotes
+        # Table name might be '"schema"."table" AS "alias"'
+        name = table_name.split()[0]
+        
         # If there's a schema prefix, extract just the table name
-        if "." in table_name:
-            _, table_part = table_name.rsplit(".", 1)
+        if "." in name:
+            _, table_part = name.rsplit(".", 1)
         else:
-            table_part = table_name
+            table_part = name
         
         # Strip surrounding quotes
         return table_part.strip('"')
+
+    def _normalize_table_name(self, table_name: str) -> str:
+        """
+        Normalize a table name to include schema and name without quotes or aliases.
+        Example: '"servicenow"."incident" AS i' -> 'servicenow.incident'
+        """
+        if not table_name:
+            return table_name
+        
+        # Remove alias
+        name = table_name.split()[0]
+        
+        # Split into parts and strip quotes
+        parts = [p.strip('"') for p in name.split(".")]
+        return ".".join(parts)
     
     def _resolve_adapter(self, query_info):
         """Determine which adapter handles this query based on table name."""
@@ -211,18 +238,23 @@ class WaveQLCursor:
         if not table_name:
             return None
         
-        clean_table = self._clean_table_name(table_name)
+        # 1. Check if it's a materialized view
+        # Use normalized name for view lookup
+        clean_table = self._normalize_table_name(query_info.table)
         
-        # 1. Check if it's a known Materialized View (Local execution)
-        # We access the view manager via the connection
         try:
              # Lazy check to avoid cyclic imports or init issues
              if hasattr(self._connection, 'view_manager') and self._connection.view_manager.exists(clean_table):
+                 # If it's a hybrid query, we want the adapter to fetch the fresh part
+                 if query_info.is_hybrid:
+                      view_info = self._connection.view_manager.get(clean_table)
+                      return self._connection.get_adapter(view_info.definition.source_adapter)
                  return None # Execute locally in DuckDB
         except Exception:
              pass
         
         # Check for schema prefix (e.g., "sales.Account" or "servicenow"."incident")
+        # Use the original table_name for schema extraction as it might contain quotes
         if "." in table_name:
             schema, _ = table_name.split(".", 1)
             # Strip quotes from schema name for lookup
@@ -293,6 +325,7 @@ class WaveQLCursor:
                     "cache_miss": cache_key is not None,
                 }
             )
+            start_time = time.perf_counter()
             try:
                 data = adapter.fetch(
                     table=clean_table,
@@ -304,6 +337,11 @@ class WaveQLCursor:
                     group_by=query_info.group_by,
                     aggregates=query_info.aggregates,
                 )
+                duration = time.perf_counter() - start_time
+                
+                # Update performance metrics for CBO
+                if data is not None:
+                    adapter._update_performance_metrics(len(data), duration)
                 
                 # Check for source query in metadata
                 if data is not None and data.schema.metadata:
@@ -334,18 +372,55 @@ class WaveQLCursor:
                 # Adapter does not support aggregation pushdown.
                 # Fallback: Fetch raw data (filtered) and execute SQL locally in DuckDB.
                 
-                step_raw = self.last_plan.add_step(
-                    name=f"Fetch raw data from {adapter.adapter_name} (Fallback)",
-                    type="fetch",
-                    details={"table": clean_table, "adapter": adapter.adapter_name}
-                )
-                # Fetch raw data with predicates pushed down
-                raw_data = adapter.fetch(
-                    table=clean_table,
-                    columns=None, 
-                    predicates=query_info.predicates
-                )
-                step_raw.finish()
+                # Check cache for RAW data first
+                cache = self._connection._cache
+                raw_cache_key = None
+                raw_data = None
+                
+                if cache.config.enabled and cache.config.should_cache_table(query_info.table):
+                    raw_cache_key = cache.generate_key(
+                        adapter_name=adapter.adapter_name,
+                        table=clean_table,
+                        columns=("*",),
+                        predicates=tuple(
+                            (p.column, p.operator, p.value) for p in query_info.predicates
+                        ) if query_info.predicates else (),
+                    )
+                    raw_data = cache.get(raw_cache_key)
+                    if raw_data is not None:
+                        logger.debug(
+                            "Cache hit (fallback): adapter=%s, table=%s, rows=%d",
+                            adapter.adapter_name, clean_table, len(raw_data)
+                        )
+                
+                if raw_data is None:
+                    step_raw = self.last_plan.add_step(
+                        name=f"Fetch raw data from {adapter.adapter_name} (Fallback)",
+                        type="fetch",
+                        details={"table": clean_table, "adapter": adapter.adapter_name, "cache_miss": True}
+                    )
+                    # Fetch raw data with predicates pushed down
+                    raw_data = adapter.fetch(
+                        table=clean_table,
+                        columns=None, 
+                        predicates=query_info.predicates
+                    )
+                    step_raw.finish()
+                    
+                    # Store in cache
+                    if raw_cache_key and raw_data is not None:
+                        cache.put(
+                            key=raw_cache_key, 
+                            data=raw_data, 
+                            adapter_name=adapter.adapter_name, 
+                            table_name=clean_table
+                        )
+                else:
+                    self.last_plan.add_step(
+                        name=f"Cache hit for {clean_table} (Fallback)",
+                        type="cache",
+                        details={"table": clean_table, "cache_key": raw_cache_key, "rows": len(raw_data)}
+                    ).finish()
                 
                 if not raw_data or len(raw_data) == 0:
                      self._rowcount = 0
@@ -376,9 +451,10 @@ class WaveQLCursor:
                     self._connection._duckdb.unregister(temp_name)
         
         elif query_info.operation == "INSERT":
+            resolved_values, _ = self._resolve_combined_parameters(query_info, parameters)
             self._rowcount = adapter.insert(
                 table=clean_table,
-                values=query_info.values,
+                values=resolved_values,
                 parameters=parameters,
             )
             # Invalidate cache for this table after write
@@ -386,10 +462,11 @@ class WaveQLCursor:
             return None
         
         elif query_info.operation == "UPDATE":
+            resolved_values, resolved_predicates = self._resolve_combined_parameters(query_info, parameters)
             self._rowcount = adapter.update(
                 table=clean_table,
-                values=query_info.values,
-                predicates=query_info.predicates,
+                values=resolved_values,
+                predicates=resolved_predicates,
                 parameters=parameters,
             )
             # Invalidate cache for this table after write
@@ -397,9 +474,10 @@ class WaveQLCursor:
             return None
         
         elif query_info.operation == "DELETE":
+            _, resolved_predicates = self._resolve_combined_parameters(query_info, parameters)
             self._rowcount = adapter.delete(
                 table=clean_table,
-                predicates=query_info.predicates,
+                predicates=resolved_predicates,
                 parameters=parameters,
             )
             # Invalidate cache for this table after write
@@ -409,6 +487,51 @@ class WaveQLCursor:
         else:
             raise QueryError(f"Unsupported operation: {query_info.operation}")
  
+    def _resolve_combined_parameters(self, query_info, parameters: Sequence):
+        """
+        Resolves parameters for both values (INSERT/UPDATE) and predicates, 
+        respecting the order they appear in the SQL.
+        
+        Note: Simple extraction assumes params align with dict iteration order for values,
+        which works for Python 3.7+ dicts if inserted in order.
+        """
+        if not parameters:
+             return query_info.values, query_info.predicates
+        
+        params_iter = iter(parameters)
+        from waveql.query_planner import ParameterPlaceholder, Predicate
+
+        # 1. Resolve Values (SET/VALUES clause)
+        # Note: We create a copy to avoid mutating the original QueryInfo in-place if reused
+        resolved_values = {}
+        for k, v in query_info.values.items():
+            if isinstance(v, ParameterPlaceholder):
+                try:
+                    resolved_values[k] = next(params_iter)
+                except StopIteration:
+                     resolved_values[k] = None
+            else:
+                 resolved_values[k] = v
+                 
+        # 2. Resolve Predicates (WHERE clause)
+        # Usually WHERE comes AFTER SET/VALUES in SQL execution flow logic
+        resolved_predicates = []
+        for p in query_info.predicates:
+            new_val = p.value
+            if isinstance(p.value, ParameterPlaceholder):
+                try:
+                    new_val = next(params_iter)
+                except StopIteration:
+                    new_val = None
+            
+            resolved_predicates.append(Predicate(
+                column=p.column,
+                operator=p.operator,
+                value=new_val
+            ))
+            
+        return resolved_values, resolved_predicates
+
     def _execute_virtual_join(self, query_info, sql: str, parameters: Sequence = None) -> pa.Table:
         """
         Execute a virtual join with semi-join pushdown optimization.
@@ -422,15 +545,24 @@ class WaveQLCursor:
  
         try:
             # 1. Map Tables & Aliases
-            # aliases: alias -> table_name
-            # Reverse map: table_name -> list of aliases (usually one)
-            table_aliases = defaultdict(list)
-            for alias, t_name in query_info.aliases.items():
-                table_aliases[t_name].append(alias)
+            # aliases: alias -> normalized_table_name
+            clean_aliases = {}
+            all_tables = set()
             
-            all_tables = {query_info.table}
+            for alias, t_full in query_info.aliases.items():
+                normalized_table = self._normalize_table_name(t_full)
+                # Map both raw and normalized alias to normalized table name
+                clean_aliases[alias] = normalized_table
+                clean_aliases[alias.strip('"')] = normalized_table
+                all_tables.add(normalized_table)
+            
+            # Ensure primary table is included
+            if query_info.table:
+                all_tables.add(self._normalize_table_name(query_info.table))
+            
+            # Ensure join tables are included (if not already via aliases)
             for join in query_info.joins:
-                all_tables.add(join["table"])
+                all_tables.add(self._normalize_table_name(join["table"]))
             
             # 2. Group initial predicates by table
             table_predicates = defaultdict(list)
@@ -439,24 +571,31 @@ class WaveQLCursor:
                 # Simple logic: if column has dot, split it.
                 if "." in pred.column:
                     alias_part, col_part = pred.column.split(".", 1)
-                    # Resolve alias
-                    table_name = query_info.aliases.get(alias_part, alias_part) # if no alias, assume it is table name
-                    # Store predicate with clean column name (optional? Adapter needs mapping?)
-                    # Current adapter fetch expects column names matching schema. 
-                    # If we strip alias from column, we must ensure adapter handles it.
-                    # BaseAdapter usually treats column names as is.
-                    # But if we push down 'u.active', the adapter for 'users' expects 'active'.
-                    # Let's strip the alias from the predicate column for the pushdown.
+                    # Resolve alias to normalized table name - strip quotes from alias part
+                    clean_alias_key = alias_part.strip('"')
+                    table_name = clean_aliases.get(clean_alias_key, clean_alias_key)
+                    table_name = self._normalize_table_name(table_name)
+                    
+                    # Strip quotes from column name for pushdown
+                    col_part = col_part.strip('"')
+                    
+                    # Strip the alias from the predicate column for the pushdown
                     p_copy = Predicate(column=col_part, operator=pred.operator, value=pred.value)
                     table_predicates[table_name].append(p_copy)
                 else:
                     # Ambiguous or Main Table? Assume main table if not aliased? 
-                    # For safety, add to main table
-                    table_predicates[query_info.table].append(pred)
+                    main_table = self._normalize_table_name(query_info.table)
+                    table_predicates[main_table].append(pred)
  
-            # 3. Execution Plan (Simple Heuristic: Tables with predicates first)
-            # We want to fetch tables that reduce the dataset first.
-            sorted_tables = sorted(all_tables, key=lambda t: len(table_predicates[t]), reverse=True)
+            # 3. Execution Plan (Cost-Based Optimization)
+            # Use optimizer to reorder tables based on latency and selectivity
+            from waveql.optimizer import QueryOptimizer
+            optimizer = QueryOptimizer()
+            sorted_tables = optimizer.reorder_joins(list(all_tables), table_predicates, self._connection)
+            
+            # Fallback heuristic if optimizer returns empty or error (though it shouldn't)
+            if not sorted_tables:
+                sorted_tables = sorted(all_tables, key=lambda t: len(table_predicates[t]), reverse=True)
             
             # 4. Fetch Loop with Pushdown
             pushed_filters = defaultdict(list) # table -> list[Predicate]
@@ -508,8 +647,8 @@ class WaveQLCursor:
                                     t1_alias, t1_col = left.split(".", 1) if "." in left else (None, left)
                                     t2_alias, t2_col = right.split(".", 1) if "." in right else (None, right)
                                     
-                                    t1_name = query_info.aliases.get(t1_alias) if t1_alias else None # Ambiguous handling omitted
-                                    t2_name = query_info.aliases.get(t2_alias) if t2_alias else None
+                                    t1_name = clean_aliases.get(t1_alias)
+                                    t2_name = clean_aliases.get(t2_alias)
                                     
                                     target = None
                                     source_col = None
@@ -548,24 +687,28 @@ class WaveQLCursor:
             # 6. Register all fetched data
             for table_name, data in dataset_cache.items():
                 if data is not None:
+                     temp_name = f"t_{uuid.uuid4().hex}"
+                     self._connection.duckdb.register(temp_name, data)
+                     registered_tables.append(temp_name)
+                     
                      if "." in table_name:
-                         schema, name = table_name.split(".", 1)
-                         schema = schema.strip('"')
-                         name = name.strip('"')
+                         parts = table_name.split(".")
+                         # Create intermediate schemas if needed
+                         for i in range(1, len(parts)):
+                             schema = ".".join([f'"{p}"' for p in parts[:i]])
+                             try:
+                                 self._connection.duckdb.execute(f'CREATE SCHEMA IF NOT EXISTS {schema}')
+                             except Exception:
+                                 pass # DuckDB might be sensitive to nested schema creation
                          
-                         self._connection.duckdb.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
-                         temp_name = f"t_{uuid.uuid4().hex}"
-                         self._connection.duckdb.register(temp_name, data)
-                         registered_tables.append(temp_name)
-                         
-                         view_name = f'"{schema}"."{name}"'
+                         view_name = ".".join([f'"{p}"' for p in parts])
                          self._connection.duckdb.execute(
                             f'CREATE OR REPLACE VIEW {view_name} AS SELECT * FROM "{temp_name}"'
                          )
                          created_views.append(view_name)
                      else:
-                         self._connection.duckdb.register(table_name, data)
-                         registered_tables.append(table_name)
+                         self._connection.duckdb.execute(f'CREATE OR REPLACE VIEW "{table_name}" AS SELECT * FROM "{temp_name}"')
+                         created_views.append(f'"{table_name}"')
  
             # 7. Execute JOIN
             step_join = self.last_plan.add_step(name="Virtual Join (DuckDB)", type="join")
@@ -594,14 +737,103 @@ class WaveQLCursor:
                 except Exception:
                     pass
     
-    def _execute_direct(self, sql: str, parameters: Sequence = None) -> pa.Table:
-        """Execute directly on DuckDB."""
+    def _execute_hybrid(self, query_info: Any, operation: str, parameters: Sequence = None) -> pa.Table:
+        """
+        Execute a hybrid query: Materialized View (Historical) + Live API (Fresh).
+        
+        This enables sub-second query speeds on historical data while 
+        guaranteeing 100% freshness by merging in live changes from the adapter.
+        """
+        step = self.last_plan.add_step(name="Hybrid Execution", type="hybrid")
+        
+        # 1. Resolve view
+        clean_name = self._normalize_table_name(query_info.table)
+        view_info = self._connection.view_manager.get(clean_name)
+        if not view_info:
+            logger.warning(f"HYBRID hint used on non-materialized table {clean_name}. Falling back to live fetch.")
+            adapter = self._resolve_adapter(query_info)
+            if adapter:
+                return self._execute_via_adapter(query_info, adapter, parameters)
+            return self._execute_direct(operation, parameters)
+            
+        # 2. Setup adapter for live fetching
+        adapter_name = view_info.definition.source_adapter
+        adapter = self._connection.get_adapter(adapter_name)
+        if not adapter:
+             raise QueryError(f"Source adapter '{adapter_name}' for view '{clean_name}' not found.")
+             
+        # 3. Determine 'freshness' boundary
+        sync_state = view_info.sync_state
+        last_sync = sync_state.last_sync_value if sync_state else None
+        sync_col = view_info.definition.sync_column
+        
+        # 4. Fetch live data
+        from waveql.query_planner import Predicate
+        live_preds = list(query_info.predicates)
+        if last_sync and sync_col:
+             live_preds.append(Predicate(column=sync_col, operator=">", value=last_sync))
+             
+        logger.info("HYBRID: Fetching fresh records from %s since %s", adapter_name, last_sync)
+        step_live = self.last_plan.add_step(name="Fetch Live Records", type="fetch")
+        
+        try:
+            live_data = adapter.fetch(
+                table=view_info.definition.source_table,
+                columns=query_info.columns,
+                predicates=live_preds
+            )
+            step_live.finish(rows=len(live_data) if live_data else 0)
+        except Exception as e:
+            logger.error(f"Hybrid live fetch failed: {e}. Falling back to historical data only.")
+            step_live.finish(error=str(e))
+            return self._execute_direct(operation, parameters)
+        
+        # 5. Hybrid Combination in DuckDB
+        live_tmp = f"live_{uuid.uuid4().hex}"
+        self._connection.duckdb.register(live_tmp, live_data)
+        
+        # Combined logic (UNION + Deduplication if PKs exist)
+        pks = view_info.definition.primary_keys
+        if pks:
+             pk_cols = ", ".join([f'"{p}"' for p in pks])
+             union_sql = f"""
+                SELECT * FROM "{clean_name}"
+                WHERE {pk_cols} NOT IN (SELECT {pk_cols} FROM "{live_tmp}")
+                UNION ALL
+                SELECT * FROM "{live_tmp}"
+             """
+        else:
+             union_sql = f'SELECT * FROM "{clean_name}" UNION ALL SELECT * FROM "{live_tmp}"'
+             
+        # 6. Execute final query shadowed by the combined union
+        shadow_view = f"shadow_{uuid.uuid4().hex}"
+        self._connection.duckdb.execute(f'CREATE TEMP VIEW "{shadow_view}" AS {union_sql}')
+        
+        # Rewrite query to use shadow view instead of the official one
+        # Use regex to replace table reference safely
+        import re
+        rewrite_regex = r'\b' + re.escape(clean_name) + r'\b'
+        shadow_sql = re.sub(rewrite_regex, f'"{shadow_view}"', operation, flags=re.IGNORECASE)
+        
+        try:
+            result = self._connection.duckdb.execute(shadow_sql).fetch_arrow_table()
+            step.finish(rows=len(result))
+            return result
+        finally:
+            try:
+                self._connection.duckdb.execute(f'DROP VIEW "{shadow_view}"')
+                self._connection.duckdb.unregister(live_tmp)
+            except Exception:
+                pass
+
+    def _execute_direct(self, operation: str, parameters: Sequence = None) -> pa.Table:
+        """Execute a query directly on DuckDB."""
         step = self.last_plan.add_step(name="Direct DuckDB execution", type="duckdb")
         try:
             if parameters:
-                result = self._connection.duckdb.execute(sql, parameters)
+                result = self._connection.duckdb.execute(operation, parameters)
             else:
-                result = self._connection.duckdb.execute(sql)
+                result = self._connection.duckdb.execute(operation)
             
             table = result.fetch_arrow_table()
             step.finish()

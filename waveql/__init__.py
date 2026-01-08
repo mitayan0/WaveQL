@@ -61,6 +61,24 @@ from waveql.streaming import (
     create_stream,
 )
 
+# Semantic Layer
+from waveql.semantic import (
+    VirtualView,
+    VirtualViewRegistry,
+    SavedQuery,
+    SavedQueryRegistry,
+    DbtManifest,
+    DbtModel,
+)
+
+# AI Functions (Vector Search & Embeddings)
+from waveql.ai import (
+    register_ai_functions,
+    EmbeddingConfig,
+    VectorSearchManager,
+)
+
+
 __version__ = "0.1.6"
 __all__ = [
     "connect",
@@ -116,6 +134,17 @@ __all__ = [
     "StreamConfig",
     "StreamStats",
     "create_stream",
+    # Semantic Layer
+    "VirtualView",
+    "VirtualViewRegistry",
+    "SavedQuery",
+    "SavedQueryRegistry",
+    "DbtManifest",
+    "DbtModel",
+    # AI Functions
+    "register_ai_functions",
+    "EmbeddingConfig",
+    "VectorSearchManager",
     # DB-API 2.0 globals
     "apilevel",
     "threadsafety",

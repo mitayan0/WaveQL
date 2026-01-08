@@ -1,0 +1,7 @@
+[
+  {"priority": "1", "hourly_cost": 500, "breach_penalty": 5000},
+  {"priority": "2", "hourly_cost": 200, "breach_penalty": 2000},
+  {"priority": "3", "hourly_cost": 100, "breach_penalty": 1000},
+  {"priority": "4", "hourly_cost": 50, "breach_penalty": 500},
+  {"priority": "5", "hourly_cost": 25, "breach_penalty": 250}
+]

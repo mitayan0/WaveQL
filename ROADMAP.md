@@ -176,80 +176,97 @@
   - [x] Smart API switching (Search vs List)
   - [x] CRUD support
 
----
 
-### Universal Aggregation Support ✅
-- [x] **Client-Side Aggregation Engine**
-  - [x] `_compute_client_side_aggregates()` in BaseAdapter
-  - [x] `_streaming_aggregate()` - PyArrow-based, memory-efficient
-  - [x] `_aggregate_with_groupby()` - Pandas-based for GROUP BY
-  - [x] `_compute_approximate_aggregates()` - Sampling-based for large datasets
-- [x] **Smart COUNT Optimization**
-  - [x] HubSpot: Uses API `total` field
-  - [x] Shopify: Uses `/count.json` endpoint
-  - [x] Zendesk: Uses API `count` field
-  - [x] Stripe: Uses `total_count` from Search API
-- [x] **Adapter Feature Parity**
-  - [x] All SaaS adapters now have `supports_aggregation = True`
-  - [x] All SaaS adapters now have `supports_batch = True`
-  - [x] Sync CRUD wrappers for HubSpot, Shopify, Zendesk, Stripe
-- [x] **Performance Monitoring**
-  - [x] Warning threshold (5,000 rows) for client-side aggregation
-  - [x] Logging for performance visibility
-- [x] **Test Coverage**
-  - [x] 24 new aggregation tests in `test_aggregation.py`
-
-### PostgreSQL WAL-Based CDC ✅
-- [x] **Zero-Latency Streaming**
-  - [x] Logical Replication/WAL integration
-  - [x] `wal2json` and `test_decoding` support
-  - [x] Async streaming iterator (`stream_changes_wal`)
-- [x] **Reliability Features**
-  - [x] Automatic slot management
-  - [x] Exponential backoff and retry logic
-  - [x] Guaranteed delivery via replication slots
 
 ---
 
-## 📋 Planned Features
-
-### v0.1.7 - Semantic Layer & Metrics
-- [ ] YAML-based metric definitions
-- [ ] Centralized business logic layer
-- [ ] dbt model integration
-- [ ] Data lineage tracking
-
-### v0.2.0 - Production Ready
-- [ ] **Integration Tests**: Live testing against real sandbox environments
-- [ ] **GraphQL Adapter**: Generic GraphQL source support
-- [ ] **Plugin System**: Custom adapter SDK for third-party extensions
-- [ ] **PostgreSQL CDC V2**
-  - [ ] **State Persistence**: Client-side LSN checkpointing
-  - [ ] **DDL Awareness**: Schema change detection via Event Triggers
-  - [ ] **Advanced Decoding**: Robust parser for `test_decoding` (arrays, JSONB)
-  - [ ] **High Availability**: Failover slot support
-- [ ] Stable API guarantee (no breaking changes in 0.2.x)
 
 ---
 
-## 📊 Feature Matrix
+## Development Roadmap (Next Steps)
 
-| Adapter | Predicate Pushdown | Aggregation | CRUD | Async | Batch |
-|---------|-------------------|-------------|------|-------|-------|
-| ServiceNow | ✅ | ✅ (Server) | ✅ | ✅ | ✅ |
-| Salesforce | ✅ | ✅ (Server) | ✅ | ✅ | ✅ |
-| Jira | ✅ | ✅ (Client) | ✅ | ✅ | ❌ |
-| **HubSpot** | ✅ | ✅ (Client) | ✅ | ✅ | ✅ |
-| **Shopify** | ✅ | ✅ (Client) | ✅ | ✅ | ✅ |
-| **Zendesk** | ✅ | ✅ (Client) | ✅ | ✅ | ✅ |
-| **Stripe** | ✅ | ✅ (Client) | ✅ | ✅ | ✅ |
-| SQL (MySQL/PostgreSQL/MSSQL) | ✅ | ✅ (Server) | ✅ | ❌ | ✅ |
-| REST | ✅ | ❌ | ✅ | ✅ | ❌ |
-| File (CSV/Parquet) | ✅ | ✅ (DuckDB) | ❌ | ✅ | ❌ |
-| **Cloud Storage (S3/GCS/Azure)** | ✅ | ✅ (DuckDB) | ❌ | ✅ | ❌ |
-| **Delta Lake** | ✅ | ✅ (DuckDB) | ❌ | ✅ | ❌ |
-| **Apache Iceberg** | ✅ | ✅ (DuckDB) | ❌ | ✅ | ❌ |
-| **Google Sheets** | ❌ | ✅ (Client) | ✅ | ✅ | ✅ |
+### v0.1.7 - The "Intelligence Layer" (Current)
+Building the bridge between raw APIs and AI agents.
+
+**AI Readiness (The Semantic Layer)** ✅
+- [x] **LLM Context Generation**: `.to_llm_context()` for prompt-ready schema descriptions.
+- [x] **Semantic Metadata**: Description fields in `DataContract` and `ColumnContract`.
+- [x] **Relationship Discovery**:
+    - [x] `RelationshipContract` for cross-adapter join hints.
+    - [x] `discover_relationships()` for automated cross-adapter link discovery.
+
+**Advanced Query Optimization (CBO)** ⚡
+- [x] **Latency Tracking**: Record `avg_latency_per_row` for all adapters.
+- [x] **Parallel Scan Foundations**: `get_parallel_plan()` primitive in `BaseAdapter`.
+- [x] **Cost-Based Planner**: Engine logic to re-order joins based on adapter latency.
+
+**Semantic Features** ✅
+- [x] **Virtual Views**: Defined in `WaveQLConnection`, expanded by `QueryPlanner`.
+- [x] **dbt Integration**: Expose models as tables (Basic support).
+- [x] **Vector Search (VSS)**:
+    - Wrapper for DuckDB's `array_distance` and similarity functions.
+    - `VectorSearchManager` with HNSW index support.
+- [x] **AI Functions**:
+    - `register_ai_functions()`: Register embedding providers (OpenAI, Ollama, Mock).
+    - `ai.embed(text)`: Generate embeddings inline.
+    - `ai.vector_search()`: Similarity search on any table.
+
+**Hybrid Querying (Cache + Live)** ✅
+- [x] `/*+ HYBRID */` hint detection in `QueryPlanner`.
+- [x] Engine to merge Materialized Views (Historical) with Live API records.
+- [x] PK-based deduplication during merge logic.
+
+**Observability & DX** ✅
+- [x] **WaveQL CLI**: Interactive SQL shell with auto-completion.
+- [x] **REPL Diagnostics**: `.stats` command for real-time cache and CBO latency monitoring.
+- [x] **SQL Query Logging**: Log exact native API calls (SOQL, JQL) generated by the engine.
+
+**Reliability Improvements** 🛠️
+- [x] **Connection Health Checks**: Active validation of pooled connections before reuse.
+- [x] **Async Fallback Pattern**: Thread-based async wrappers for sync-only adapters (REST).
+- [x] **Enhanced Retry Logic**: Automatic 429 backoff for REST adapter.
+
+**Big Data & Ecosystem** 🚀
+- [ ] **PySpark Integration**: Create `WaveQLDataSource` for distributed Spark pipelines.
+- [ ] **Ray Integration**: Support for partitioned parallel fetching into Ray clusters.
+
+**Reliability & Future Research** 🛠️
+- [x] **Stateful CDC Backend**:
+    - `StateBackend` abstract class with SQLite, Redis, and Memory implementations.
+    - `StreamPosition` for tracking LSN/offset/last_key across restarts.
+    - `create_state_backend()` factory function.
+- [ ] **Atomic Writes / 2PC (Research)**: Investigating atomic cross-adapter transactions.
+
+- [x] **Webhook Listener**:
+    - New `WaveQLWebhookServer` to ingest real-time pushes (Shopify/Stripe).
+    - Invalidate/Upsert local cache immediately upon receipt.
+- [x] **Singer Protocol Bridge**:
+    - `SingerAdapter` class to wrap existing Tap executables.
+- [x] **Wasm Compilation**:
+    - [x] Port core logic (Planner/Adapters) to run inside Pyodide.
+
+---
+
+## 🏗️ Architectural Pillars (2026)
+
+1.  **Intelligence Layer**: We are not just a connector; we are the *semantic* layer that makes APIs understandable to LLMs.
+2.  **State Persistence**: Moving from "script" to "service" requires durability (CDC checkpoints).
+3.  **Adaptive Schema**: Validating data (Contracts) is good; *evolving* with it (Adaptive Contracts) is better.
+4.  **Cost-Based Optimization**: Track adapter latency and throughput to optimize join ordering.
+
+## 🔍 Critical Implementation Tasks
+
+- [x] **State Persistence**:
+  - [x] *Goal*: `stream_changes()` must survive a crash.
+  - [x] *Tech*: Add `.waveql_state` sqlite DB to track source offsets.
+
+- [x] **Schema Drift Handling**:
+  - [x] *Goal*: Don't crash when HubSpot adds a field.
+  - [x] *Tech*: `AdaptiveModel` base class for Pydantic that implements `model_config['extra'] = 'allow'`.
+
+- [x] **Semantic Metadata Export**:
+  - [x] *Goal*: Let Metabase/Looker understand our table relationships.
+  - [x] *Tech*: Export `DataContract` registry to dbt-compatible `.yaml`.
 
 ---
 

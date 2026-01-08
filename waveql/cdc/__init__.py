@@ -9,7 +9,12 @@ Supported Providers:
 - ServiceNow (polling-based)
 - Salesforce (polling-based)
 - Jira (polling-based)
-- PostgreSQL (WAL-based logical replication) - NEW!
+- PostgreSQL (WAL-based logical replication)
+
+State Backends:
+- SQLite (local file-based)
+- Redis (distributed)
+- Memory (ephemeral, for testing)
 """
 
 from waveql.cdc.models import Change, ChangeType, ChangeStream
@@ -19,6 +24,14 @@ from waveql.cdc.providers import (
     ServiceNowCDCProvider,
     SalesforceCDCProvider,
     JiraCDCProvider,
+)
+from waveql.cdc.state import (
+    StateBackend,
+    StreamPosition,
+    SQLiteStateBackend,
+    MemoryStateBackend,
+    RedisStateBackend,
+    create_state_backend,
 )
 
 # PostgreSQL CDC provider (optional - requires psycopg2)
@@ -38,4 +51,12 @@ __all__ = [
     "SalesforceCDCProvider",
     "JiraCDCProvider",
     "PostgresCDCProvider",
+    # State backends
+    "StateBackend",
+    "StreamPosition",
+    "SQLiteStateBackend",
+    "MemoryStateBackend",
+    "RedisStateBackend",
+    "create_state_backend",
 ]
+

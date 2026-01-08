@@ -3,6 +3,7 @@ Salesforce Adapter - Query Salesforce using SOQL via REST API
 """
 
 from __future__ import annotations
+import logging
 import urllib.parse
 from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 import requests
@@ -15,6 +16,8 @@ from waveql.schema_cache import ColumnInfo
 
 if TYPE_CHECKING:
     from waveql.query_planner import Predicate
+
+logger = logging.getLogger(__name__)
 
 
 class SalesforceAdapter(BaseAdapter):
@@ -119,6 +122,9 @@ class SalesforceAdapter(BaseAdapter):
             soql += f" LIMIT {limit}"
         if offset:
             soql += f" OFFSET {offset}"
+        
+        # Log the SOQL query for observability
+        logger.debug("Salesforce SOQL query: %s", soql)
             
         # 3. Execute Query
         records = self._execute_soql(soql)

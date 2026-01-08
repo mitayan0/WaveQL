@@ -49,6 +49,7 @@ class ViewDefinition:
     storage_path: Optional[Path] = None
     created_at: datetime = field(default_factory=datetime.now)
     columns: List[ColumnInfo] = field(default_factory=list)
+    primary_keys: List[str] = field(default_factory=list) # Column names
     
     def __repr__(self) -> str:
         """String representation for debugging."""
@@ -69,6 +70,7 @@ class ViewDefinition:
                 {"name": c.name, "data_type": c.data_type, "nullable": c.nullable}
                 for c in self.columns
             ],
+            "primary_keys": self.primary_keys,
         }
     
     @classmethod
@@ -88,6 +90,7 @@ class ViewDefinition:
             storage_path=Path(data["storage_path"]) if data.get("storage_path") else None,
             created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else datetime.now(),
             columns=columns,
+            primary_keys=data.get("primary_keys", []),
         )
 
 

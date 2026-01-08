@@ -218,7 +218,8 @@ class TestBaseAdapterAggregation:
         
         result = adapter._compute_client_side_aggregates(empty_table, None, aggregates)
         
-        assert len(result) == 0  # Empty result
+        assert len(result) == 1  # Standard SQL: SELECT COUNT(*) FROM empty returns 0 (1 row)
+        assert result.column("cnt")[0].as_py() == 0
 
     # --- Performance Warning Tests ---
     

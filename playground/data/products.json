@@ -1,0 +1,10 @@
+[
+  {"product_id": "P001", "name": "Laptop Pro", "category": "Electronics", "price": 1299.99, "stock": 50},
+  {"product_id": "P002", "name": "Wireless Mouse", "category": "Electronics", "price": 29.99, "stock": 200},
+  {"product_id": "P003", "name": "Office Chair", "category": "Furniture", "price": 349.99, "stock": 30},
+  {"product_id": "P004", "name": "Standing Desk", "category": "Furniture", "price": 599.99, "stock": 25},
+  {"product_id": "P005", "name": "Monitor 27\"", "category": "Electronics", "price": 449.99, "stock": 75},
+  {"product_id": "P006", "name": "Keyboard Mechanical", "category": "Electronics", "price": 149.99, "stock": 120},
+  {"product_id": "P007", "name": "Desk Lamp", "category": "Accessories", "price": 45.99, "stock": 80},
+  {"product_id": "P008", "name": "Webcam HD", "category": "Electronics", "price": 89.99, "stock": 60}
+]

@@ -267,6 +267,45 @@ contract = DataContract.from_arrow_schema(
 registry.save_to_file(contract, "contracts/discovered_table.json")
 ```
 
+## Adaptive Schema Support
+
+Data contracts in WaveQL are **adaptive**. They inherit from `AdaptiveModel`, which means they are resilient to upstream API changes.
+
+*   **Extra Fields**: If an API adds a new field that is *not* in your contract, validation will **pass** (the extra field is ignored during validation but present in the data).
+*   **Missing Fields**: If a *required* field is missing, validation fails.
+*   **Type Mismatches**: If a field type changes, validation fails.
+
+This approach ensures "Schema Drift Handling" — your integration doesn't crash just because HubSpot added a `custom_field_xyz` overnight, but it *will* alert you if critical data structures break.
+
+## Integration with dbt
+
+WaveQL bridges the gap between operational APIs and your analytical warehouse. You can export your Data Contracts directly to **dbt** source definitions.
+
+```python
+# Export all registered contracts to a dbt sources.yml
+registry.export_to_dbt("./models/sources.yml")
+```
+
+**Generated `sources.yml`:**
+```yaml
+version: 2
+sources:
+  - name: servicenow
+    tables:
+      - name: incident
+        description: ServiceNow incident records
+        columns:
+          - name: sys_id
+            tests:
+              - unique
+              - not_null
+          - name: number
+            tests:
+              - not_null
+```
+
+This ensures your dbt tests match your operational data contracts, creating a unified semantic layer.
+
 ## Best Practices
 
 1. **Version your contracts**: Use the `version` field to track breaking changes

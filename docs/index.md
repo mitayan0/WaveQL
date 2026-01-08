@@ -18,6 +18,7 @@ Complete guide to connecting and querying all supported data sources.
 *   [Google Sheets](quickstart.md#google-sheets) ✨ NEW - Query spreadsheets with SQL
 *   [Cross-Source Joins](quickstart.md#cross-source-joins) - Join anything!
 *   [Streaming & Scalability](quickstart.md#streaming-large-datasets) ✨ NEW - Processing million-row datasets
+*   [Get Test Credentials](testing.md) - How to get free developer accounts for ServiceNow, Salesforce, etc.
 
 ## Core Concepts
 
@@ -91,6 +92,15 @@ Pydantic-based schema validation for type-safe data pipelines.
 *   [Runtime Validation](contracts.md#validate-data) - Catch mismatches early
 *   [Schema Drift Detection](contracts.md#schema-drift-detection) - Alert on API changes
 *   [JSON Schema Export](contracts.md#json-schema-export) - Auto-generated documentation
+
+### [Semantic Layer & Intelligence](intelligence_layer.md) ✨ NEW (v0.1.7)
+Build reusable abstractions and bridge the gap to AI.
+*   [Semantic Metadata & LLM Context](intelligence_layer.md#1-semantic-metadata--llm-context)
+*   [Relationship Discovery](intelligence_layer.md#2-relationship-discovery)
+*   [Cost-Based Optimizer (CBO)](intelligence_layer.md#3-cost-based-optimizer-cbo)
+*   [Hybrid Querying](intelligence_layer.md#4-hybrid-querying)
+*   **Virtual Views**: Define SQL views over API data
+*   **dbt Integration**: Load dbt models directly into WaveQL
 
 ## Reference
 

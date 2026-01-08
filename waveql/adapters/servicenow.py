@@ -10,6 +10,7 @@ Features:
 
 from __future__ import annotations
 import json
+import logging
 from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 
 import requests
@@ -22,6 +23,8 @@ from waveql.schema_cache import ColumnInfo
 
 if TYPE_CHECKING:
     from waveql.query_planner import Predicate
+
+logger = logging.getLogger(__name__)
 
 
 class ServiceNowAdapter(BaseAdapter):
@@ -119,6 +122,14 @@ class ServiceNowAdapter(BaseAdapter):
         url = f"{self._host}/api/now/table/{table_name}"
         
         params = self._build_query_params(columns, predicates, limit, offset, order_by)
+        
+        # Log the API query for observability
+        logger.debug(
+            "ServiceNow query: table=%s, sysparm_query=%s, sysparm_fields=%s",
+            table_name,
+            params.get("sysparm_query", ""),
+            params.get("sysparm_fields", "*"),
+        )
         
         # Fetch data (with pagination if needed)
         if limit and limit <= self._page_size:

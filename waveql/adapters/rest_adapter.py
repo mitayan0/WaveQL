@@ -6,17 +6,20 @@ Allows querying any REST API with configurable endpoints.
 
 from __future__ import annotations
 import json
+import logging
 from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 
 import requests
 import pyarrow as pa
 
 from waveql.adapters.base import BaseAdapter
-from waveql.exceptions import AdapterError, QueryError
+from waveql.exceptions import AdapterError, QueryError, RateLimitError
 from waveql.schema_cache import ColumnInfo
 
 if TYPE_CHECKING:
     from waveql.query_planner import Predicate
+
+logger = logging.getLogger(__name__)
 
 
 class RESTAdapter(BaseAdapter):
@@ -54,6 +57,7 @@ class RESTAdapter(BaseAdapter):
         self._endpoints = endpoints or {}
         self._data_path = data_path
         self._timeout = timeout
+        self._max_auto_fetch = kwargs.get("max_auto_fetch", 5000)
         # Note: HTTP sessions are now managed by the connection pool in BaseAdapter
         # Use self._get_session() context manager for requests
     
@@ -76,39 +80,144 @@ class RESTAdapter(BaseAdapter):
         endpoint_config = self._get_endpoint_config(table)
         url = f"{self._host}{endpoint_config['path']}"
         
-        # Build query params with predicate pushdown
-        params = self._build_params(endpoint_config, predicates, limit, offset)
+        # Determine which predicates are unhandled and must be applied client-side
+        unhandled_predicates = []
+        supports_filter = endpoint_config.get("supports_filter", True)
+        supports_like = endpoint_config.get("supports_like", False)
+        filter_format = endpoint_config.get("filter_format", "query")
+        
+        if not supports_filter:
+            unhandled_predicates = list(predicates) if predicates else []
+        else:
+            for pred in (predicates or []):
+                is_handled = False
+                if filter_format == "query":
+                    if pred.operator in ("=", "IN"):
+                        is_handled = True
+                    elif pred.operator == "LIKE" and supports_like:
+                        is_handled = True
+                elif filter_format == "json":
+                    if pred.operator in ("=", "IN"):
+                        is_handled = True
+                
+                if not is_handled:
+                    unhandled_predicates.append(pred)
+        
+        # If we have unhandled filtering to do, we generally cannot trust server-side limit/offset
+        # because the server will apply them BEFORE our client-side filter.
+        # So we must fetch all matching server-side records (or a larger page) and filter/limit locally.
+        should_push_limit = (limit is not None) and not unhandled_predicates and endpoint_config.get("supports_limit", True)
+        should_push_offset = (offset is not None) and not unhandled_predicates and endpoint_config.get("supports_offset", True)
+        
+        # Build query params with effective pushdown
+        push_limit = limit if should_push_limit else None
+        push_offset = offset if should_push_offset else None
+        
+        params = self._build_params(endpoint_config, predicates, push_limit, push_offset)
         
         headers = {
             "Accept": "application/json",
             **self._get_auth_headers(),
         }
         
+        # Log the API query for observability
+        logger.debug(
+            "REST API query: table=%s, url=%s, params=%s",
+            table, url, params
+        )
+        
         with self._get_session() as session:
-            def do_request():
-                response = session.get(url, params=params, headers=headers, timeout=self._timeout)
-                response.raise_for_status()
-                return response.json()
-            
             try:
-                # Use rate limiter for automatic retry
-                data = self._rate_limiter.execute_with_retry(do_request)
+                # Pagination Loop
+                all_records = []
+                fetched_count = 0
                 
-                # Extract records from response
-                records = self._extract_records(data, endpoint_config)
+                # If we are pushing offset, we start fetching from that offset.
+                # If not (e.g. client-side filtering), we must fetch from 0 to find all matches.
+                current_api_offset = offset if (offset and should_push_offset) else 0
                 
+                # If we are pushing limit, we stop after that many records.
+                # If limits are applied client-side (e.g. filtering), we fetch up to SAFETY_LIMIT.
+                MAX_AUTO_FETCH = self._max_auto_fetch
+                max_fetch = limit if (limit and should_push_limit) else MAX_AUTO_FETCH
+                
+                while True:
+                    # Determine batch size
+                    batch_size = 100
+                    
+                    # If we are targetting a specific fetch count (pushed limit), restrain batch size
+                    if limit and should_push_limit:
+                        remaining = limit - fetched_count
+                        if remaining <= 0:
+                            break
+                        batch_size = min(100, remaining)
+                    
+                    # Build params: Always request specific batch size and current offset
+                    epoch_params = self._build_params(endpoint_config, predicates, batch_size, current_api_offset)
+                    
+                    # Use rate limiter for automatic retry on rate limit errors
+                    def do_request():
+                        resp = session.get(url, params=epoch_params, headers=headers, timeout=self._timeout)
+                        if resp.status_code == 429:
+                            retry_after = int(resp.headers.get("Retry-After", 60))
+                            raise RateLimitError("Rate limit exceeded", retry_after=retry_after)
+                        resp.raise_for_status()
+                        return resp
+                    
+                    response = self._rate_limiter.execute_with_retry(do_request)
+                    data = response.json()
+                    
+                    batch_records = self._extract_records(data, endpoint_config)
+                    
+                    if not batch_records:
+                        break
+                        
+                    all_records.extend(batch_records)
+                    fetched_count += len(batch_records)
+                    current_api_offset += len(batch_records)
+                    
+                    # Stop conditions
+                    # 1. End of data (API returned fewer than requested page size)
+                    if len(batch_records) < batch_size: 
+                        break
+                        
+                    # 2. Limit reached
+                    if fetched_count >= max_fetch:
+                        if limit is None or not should_push_limit:
+                             # We hit safety limit during auto-fetch or client-side filter fetch
+                             logger.warning(
+                                 "Auto-pagination hit safety limit of %d records for %s. "
+                                 "Use 'LIMIT' in your query to fetch more or refine your filters.",
+                                 max_fetch, table
+                             )
+                        break
+                
+                records = all_records
+
                 # Discover schema
                 schema_columns = self._get_or_discover_schema(table, records)
                 
-                # Apply client-side filtering for non-pushdown predicates
-                if predicates and not endpoint_config.get("supports_filter", True):
-                    records = self._apply_filters(records, predicates)
+                # Apply client-side filtering for predicates that weren't pushed down
+                if unhandled_predicates:
+                    records = self._apply_filters(records, unhandled_predicates)
                 
                 # Apply limit/offset if not done server-side
-                if offset and not endpoint_config.get("supports_offset", True):
-                    records = records[offset:]
-                if limit and not endpoint_config.get("supports_limit", True):
-                    records = records[:limit]
+                # Note: We accumulated 'fetched_count' records starting from 'offset' (if pushed) or 0.
+                
+                # If we PUSHED offset, 'records' starts at offset.
+                # If we did NOT push offset, 'records' starts at 0.
+                
+                start_index = 0
+                if offset and not should_push_offset:
+                    start_index = offset
+                
+                end_index = len(records)
+                if limit and not should_push_limit:
+                     end_index = start_index + limit
+                
+                # Apply slicing
+                if start_index > 0 or end_index < len(records):
+                    records = records[start_index:end_index]
                 
                 return self._to_arrow(records, schema_columns, columns)
                 
@@ -133,7 +242,7 @@ class RESTAdapter(BaseAdapter):
         predicates: List["Predicate"],
         limit: int,
         offset: int,
-    ) -> Dict[str, str]:
+    ) -> Dict[str, Any]:
         """Build query parameters."""
         params = {}
         
@@ -147,10 +256,23 @@ class RESTAdapter(BaseAdapter):
                 for pred in predicates:
                     if pred.operator == "=":
                         params[pred.column] = pred.value
+                    elif pred.operator == "IN":
+                        # Many APIs (like JSONPlaceholder) support ?id=1&id=2
+                        # requests handles list values as repeated params
+                        params[pred.column] = pred.value
+                    elif pred.operator == "LIKE" and config.get("supports_like", False):
+                        # Only if explicit support configured
+                        params[f"{pred.column}_like"] = pred.value
             elif filter_format == "json":
                 # JSON filter
-                filters = {pred.column: pred.value for pred in predicates if pred.operator == "="}
-                params[filter_param] = json.dumps(filters)
+                filters = {}
+                for pred in predicates:
+                    if pred.operator == "=":
+                        filters[pred.column] = pred.value
+                    elif pred.operator == "IN":
+                        filters[pred.column] = {"$in": pred.value}
+                if filters:
+                    params[filter_param] = json.dumps(filters)
         
         # Pagination
         if limit and config.get("supports_limit", True):
@@ -182,7 +304,7 @@ class RESTAdapter(BaseAdapter):
         elif isinstance(data, dict):
             return [data]
         return []
-    
+
     def _apply_filters(self, records: List[Dict], predicates: List["Predicate"]) -> List[Dict]:
         """Apply client-side filtering."""
         filtered = []
@@ -191,22 +313,54 @@ class RESTAdapter(BaseAdapter):
             for pred in predicates:
                 value = record.get(pred.column)
                 
+                # Check for type mismatch (e.g. string "1" vs int 1)
+                # We try to coerce record value to predicate value type if possible
+                if value is not None and not isinstance(value, type(pred.value)) and pred.value is not None:
+                     try:
+                         if isinstance(pred.value, int):
+                             value = int(value)
+                         elif isinstance(pred.value, float):
+                             value = float(value)
+                         elif isinstance(pred.value, str):
+                             value = str(value)
+                     except (ValueError, TypeError):
+                         pass
+                
                 if pred.operator == "=":
                     match = value == pred.value
                 elif pred.operator == "!=":
                     match = value != pred.value
                 elif pred.operator == ">":
-                    match = value > pred.value
+                    try: match = value > pred.value
+                    except TypeError: match = False
                 elif pred.operator == "<":
-                    match = value < pred.value
+                    try: match = value < pred.value
+                    except TypeError: match = False
                 elif pred.operator == ">=":
-                    match = value >= pred.value
+                    try: match = value >= pred.value
+                    except TypeError: match = False
                 elif pred.operator == "<=":
-                    match = value <= pred.value
+                    try: match = value <= pred.value
+                    except TypeError: match = False
+                elif pred.operator == "IN":
+                    # For IN, we check if value exists in list.
+                    # Handle type mismatch for list items
+                    p_values = pred.value if isinstance(pred.value, list) else [pred.value]
+                    
+                    # Try direct check first
+                    if value in p_values:
+                        match = True
+                    else:
+                        # Try string comparison fallback
+                        str_val = str(value)
+                        str_p_values = [str(v) for v in p_values]
+                        match = str_val in str_p_values
+                        
                 elif pred.operator == "LIKE":
                     import re
                     pattern = pred.value.replace("%", ".*").replace("_", ".")
-                    match = bool(re.match(pattern, str(value or ""), re.IGNORECASE))
+                    # Ensure value is string
+                    match = bool(re.search(pattern, str(value or ""), re.IGNORECASE))
                 
                 if not match:
                     break
@@ -394,3 +548,62 @@ class RESTAdapter(BaseAdapter):
                 return 1
         except requests.RequestException as e:
             raise QueryError(f"DELETE failed: {e}")
+
+    # =========================================================================
+    # Async Fallback Methods
+    # =========================================================================
+    # RESTAdapter uses sync requests library, but we provide async wrappers
+    # that run the sync methods in a thread pool for compatibility.
+
+    async def fetch_async(
+        self,
+        table: str,
+        columns: List[str] = None,
+        predicates: List["Predicate"] = None,
+        limit: int = None,
+        offset: int = None,
+        order_by: List[tuple] = None,
+        group_by: List[str] = None,
+        aggregates: List[Any] = None,
+    ) -> pa.Table:
+        """Fetch data from REST endpoint (async fallback via thread pool)."""
+        import asyncio
+        return await asyncio.to_thread(
+            self.fetch, table, columns, predicates, limit, offset, order_by, group_by, aggregates
+        )
+
+    async def get_schema_async(self, table: str) -> List[ColumnInfo]:
+        """Discover schema (async fallback via thread pool)."""
+        import asyncio
+        return await asyncio.to_thread(self.get_schema, table)
+
+    async def insert_async(
+        self,
+        table: str,
+        values: Dict[str, Any],
+        parameters: Sequence = None,
+    ) -> int:
+        """Insert via POST (async fallback via thread pool)."""
+        import asyncio
+        return await asyncio.to_thread(self.insert, table, values, parameters)
+
+    async def update_async(
+        self,
+        table: str,
+        values: Dict[str, Any],
+        predicates: List["Predicate"] = None,
+        parameters: Sequence = None,
+    ) -> int:
+        """Update via PATCH (async fallback via thread pool)."""
+        import asyncio
+        return await asyncio.to_thread(self.update, table, values, predicates, parameters)
+
+    async def delete_async(
+        self,
+        table: str,
+        predicates: List["Predicate"] = None,
+        parameters: Sequence = None,
+    ) -> int:
+        """Delete via DELETE (async fallback via thread pool)."""
+        import asyncio
+        return await asyncio.to_thread(self.delete, table, predicates, parameters)

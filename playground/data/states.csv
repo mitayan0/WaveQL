@@ -1,0 +1,7 @@
+state_id,state_name,is_active,category
+1,New,true,Open
+2,In Progress,true,Open
+3,On Hold,true,Pending
+4,Resolved,false,Closed
+5,Closed,false,Closed
+6,Cancelled,false,Closed

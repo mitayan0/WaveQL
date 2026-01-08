@@ -23,16 +23,19 @@ def mock_rest_adapter():
 
 @responses.activate
 def test_fetch_users(mock_rest_adapter):
-    # Mock response
+    # Mock response - use callback to accept any query params
     users_data = [
         {"id": 1, "name": "Alice", "role": "admin"},
         {"id": 2, "name": "Bob", "role": "user"}
     ]
+    
+    # Add response that matches pagination params (offset=0 is not sent since it's falsy)
     responses.add(
         responses.GET,
         "https://api.example.com/users",
         json=users_data,
-        status=200
+        status=200,
+        match=[matchers.query_string_matcher("limit=100")]
     )
     
     # Exec fetch
@@ -48,13 +51,13 @@ def test_fetch_users_with_filter(mock_rest_adapter):
     # Mock response with query params
     users_data = [{"id": 1, "name": "Alice", "role": "admin"}]
     
-    # Expect query params in URL
+    # Expect query params in URL (limit is added by pagination, offset=0 is not sent)
     responses.add(
         responses.GET,
         "https://api.example.com/users",
         json=users_data,
         status=200,
-        match=[matchers.query_string_matcher("role=admin")]
+        match=[matchers.query_string_matcher("role=admin&limit=100")]
     )
     
     predicates = [Predicate("role", "=", "admin")]
@@ -137,11 +140,13 @@ def test_client_side_filtering(mock_rest_adapter):
         {"id": 2, "name": "Bob", "role": "user"}
     ]
     
+    # When supports_filter=False, predicates are not pushed down, so we expect pagination params only (offset=0 not sent)
     responses.add(
         responses.GET,
         "https://api.example.com/users",
         json=users_data,
-        status=200
+        status=200,
+        match=[matchers.query_string_matcher("limit=100")]
     )
     
     predicates = [Predicate("role", "=", "admin")]
