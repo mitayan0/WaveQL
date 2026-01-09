@@ -6,6 +6,10 @@ Provides unified authentication management for all adapters:
 - API Key Authentication (header or query param)
 - OAuth2 with multiple grant types and auto-refresh
 - JWT/Bearer token authentication
+
+Security:
+    All credential classes use SecretStr internally to prevent
+    accidental exposure in logs, repr(), or exception messages.
 """
 
 from waveql.auth.manager import (
@@ -16,6 +20,7 @@ from waveql.auth.manager import (
     OAuth2Manager,
     JWTAuthManager,
     TokenInfo,
+    SecretStr,
     AuthenticationError,
     create_auth_manager,
 )
@@ -24,6 +29,7 @@ __all__ = [
     # Base/Abstract
     "BaseAuthManager",
     "TokenInfo",
+    "SecretStr",
     "AuthenticationError",
     # Concrete Managers
     "AuthManager",

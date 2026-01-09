@@ -46,6 +46,8 @@ class WaveQLConnection(ConnectionMixin):
         cache_ttl: float = None,
         cache_config: CacheConfig = None,
         enable_cache: bool = True,
+        # Transaction configuration
+        transaction_db_path: str = None,
         **kwargs
     ):
         # Parse connection string if provided
@@ -103,6 +105,9 @@ class WaveQLConnection(ConnectionMixin):
         
         # Initialize materialized view manager (lazy loaded)
         self._view_manager: Optional["MaterializedViewManager"] = None
+        
+        # Transaction database path (None = use default ~/.waveql/transactions.db)
+        self._transaction_db_path = transaction_db_path
         
         logger.debug(
             "WaveQLConnection created: adapter=%s, host=%s, cache=%s",
@@ -817,6 +822,83 @@ class WaveQLConnection(ConnectionMixin):
             ttl: TTL in seconds
         """
         self._cache.config.adapter_ttl[adapter] = ttl
+    
+    # =========================================================================
+    # Transaction Support (Saga Pattern)
+    # =========================================================================
+    
+    def transaction(self):
+        """
+        Start a distributed transaction with Saga pattern semantics.
+        
+        This provides best-effort atomic writes across multiple adapters.
+        If any operation fails, previous operations are compensated (rolled back).
+        
+        IMPORTANT LIMITATIONS:
+        - This is NOT true ACID (REST APIs don't support it)
+        - Compensation may fail in rare cases (logged for manual recovery)
+        - No isolation guarantees between concurrent transactions
+        - Works best for idempotent operations
+        
+        Returns:
+            Context manager yielding a TransactionCoordinator
+            
+        Example:
+            ```python
+            # Insert into multiple systems atomically
+            with conn.transaction() as txn:
+                txn.insert("servicenow.incident", {
+                    "short_description": "Server outage",
+                    "priority": 1
+                })
+                txn.insert("salesforce.Case", {
+                    "Subject": "Server outage",
+                    "Priority": "High"
+                })
+                # Both succeed, or both are rolled back
+            
+            # Handle errors explicitly
+            try:
+                with conn.transaction() as txn:
+                    txn.insert("servicenow.incident", {...})
+                    txn.update("salesforce.Contact", {...}, where={"Id": "001..."})
+            except Exception as e:
+                print(f"Transaction failed and was rolled back: {e}")
+            ```
+        
+        Recovery:
+            If the process crashes during a transaction, call
+            `conn.recover_pending_transactions()` at startup to
+            complete any rollbacks.
+        """
+        from waveql.transaction import TransactionCoordinator, TransactionLog
+        
+        log = TransactionLog(db_path=self._transaction_db_path)
+        coordinator = TransactionCoordinator(adapters=self._adapters, log=log)
+        return coordinator.transaction()
+    
+    def recover_pending_transactions(self) -> list:
+        """
+        Recover any transactions that were in progress when the process crashed.
+        
+        Call this at application startup to ensure consistency.
+        
+        Returns:
+            List of recovered Transaction objects
+            
+        Example:
+            ```python
+            conn = waveql.connect(...)
+            recovered = conn.recover_pending_transactions()
+            if recovered:
+                logger.warning(f"Recovered {len(recovered)} crashed transactions")
+            ```
+        """
+        from waveql.transaction import TransactionCoordinator, TransactionLog
+        
+        log = TransactionLog(db_path=self._transaction_db_path)
+        coordinator = TransactionCoordinator(adapters=self._adapters, log=log)
+        return coordinator.recover_pending()
     
     def __repr__(self) -> str:
         """String representation for debugging."""

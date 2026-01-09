@@ -34,10 +34,14 @@ class ViewStorage:
         Initialize storage.
         
         Args:
-            base_path: Base directory for view storage. Defaults to ~/.waveql/views/
+            base_path: Base directory for view storage. If None, uses centralized config.
         """
         if base_path is None:
-            base_path = Path.home() / ".waveql" / "views"
+            try:
+                from waveql.config import get_config
+                base_path = get_config().views_dir
+            except ImportError:
+                base_path = Path.home() / ".waveql" / "views"
         
         self.base_path = base_path
         self.base_path.mkdir(parents=True, exist_ok=True)

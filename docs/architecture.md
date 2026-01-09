@@ -1,121 +1,46 @@
-# WaveQL Architecture
+# Architecture
 
-This document describes the internal architecture of WaveQL, detailing how it bridges the gap between Relational SQL and RESTful APIs.
-
-## System Overview
-
-WaveQL functions as a **transpiler and execution engine**. It parses SQL input, optimizes the query plan by pushing operations down to the source API, validates schemas, and manages the HTTP transport of data.
+## System Diagram
 
 ```mermaid
 graph TD
-    User[User / Application] -->|SQL Query| Connection[WaveQL Connection]
+    User[App / CLI] -->|SQL| Connection
     Connection -->|Cursor| Parser[SQL Parser]
     
-    subgraph Engine [Execution Engine]
-        Parser -->|AST| Optimizer[Query Optimizer]
+    subgraph Engine [WaveQL Engine]
+        Parser -->|AST| Optimizer[Optimizer]
         Optimizer -->|Plan| Executor[Adapter Executor]
     end
     
-    subgraph Adapters [Adapter Layer]
-        Executor -->|Native Query (SOQL/JQL)| SN[ServiceNow Adapter]
-        Executor -->|Native Query| SF[Salesforce Adapter]
-        Executor -->|Native Query| Jira[Jira Adapter]
+    subgraph Adapters [Data Source]
+        Executor -->|JQL| Jira
+        Executor -->|SOQL| Salesforce
+        Executor -->|SQL| Postgres
     end
     
-    SN -->|HTTP Request| API1[ServiceNow API]
-    SF -->|HTTP Request| API2[Salesforce API]
-    Jira -->|HTTP Request| API3[Jira API]
-    
-    API1 -->|JSON| Transf[Result Transformer]
-    API2 -->|JSON| Transf
-    API3 -->|JSON| Transf
-    
-    Transf -->|Arrow Table| User
+    Jira -->|JSON| Arrow[Arrow Buffer]
+    Salesforce -->|JSON| Arrow
+    Arrow -->|Table| User
 ```
 
 ## Core Components
 
-### 1. Connection Manager (`WaveQLConnection`)
-The entry point for the library. It creates standard DB-API cursors and manages the lifecycle of the underlying `httpx.Client`. It handles:
-*   **Connection Pooling** (via `requests` for sync, `httpx` for async)
-    *   **Health Checks**: Active validation (`HEAD` probes or stale checks) before recycling connections to avoid "Connection Reset" errors.
-    *   **Concurrency Control**: Thread-safe pool with global locks to prevent socket exhaustion.
-*   Authentication State Management
-*   Adapter Factory pattern resolution
+*   **Connection (`connection.py`)**: Entry point DB-API 2.0. Manages `httpx` pool and Auth.
+*   **Optimizer (`query_planner.py`)**:
+    *   **Pushdown**: Extracts `WHERE` -> Native filters (JQL/SOQL).
+    *   **Federation**: Splits JOINs into separate API calls -> DuckDB.
+*   **Transport**:
+    *   **Zero-Copy**: Types mapped directly to `pyarrow.Table`.
+    *   **Async-First**: All I/O is `asyncio`/`anyio` native.
+*   **CDC**:
+    *   **Polling**: Timestamp-based cursor tracking.
+    *   **WAL**: Postgres replication slot streaming.
 
-### 2. The Predicate Pushdown Engine
-One of WaveQL's most critical features is its ability to "push down" SQL `WHERE` clauses to the remote API. This prevents fetching excessive data and filtering it locally (slow) vs asking the API for exactly what is needed (fast).
+## Identifiers
+We support:
+1.  **Simple**: `incident`
+2.  **Qualified**: `servicenow.incident`
+3.  **Quoted**: `"incident"`, `"servicenow"."incident"`
 
-**Process:**
-1.  **Parsing**: The SQL `WHERE` clause is parsed into an Abstract Syntax Tree (AST).
-2.  **Visitor Traversal**: An adapter-specific "Visitor" traverses the AST.
-3.  **Translation**: 
-    *   For **Salesforce**, `WHERE status = 'New'` becomes `SELECT ... WHERE Status = 'New'` (SOQL).
-    *   For **Jira**, `WHERE project = 'PROJ'` becomes `project = "PROJ"` (JQL).
-    *   For **ServiceNow**, `WHERE priority < 3` becomes `priority<3` (sysparm_query).
-
-### SQL Identifier Support
-
-WaveQL supports both **quoted** and **unquoted** SQL identifiers for schema and table names. This provides maximum compatibility with different SQL clients and tools.
-
-**Supported Formats:**
-
-| Format | Example | Description |
-|:-------|:--------|:------------|
-| Simple table | `incident` | Unquoted table name |
-| Schema-qualified | `servicenow.incident` | Unquoted schema prefix |
-| Quoted table | `"incident"` | Table name with quotes |
-| Fully quoted | `"servicenow"."incident"` | Both schema and table quoted |
-| Mixed | `servicenow."incident"` | Unquoted schema, quoted table |
-
-**Example Queries:**
-```sql
--- All of these are equivalent:
-SELECT * FROM incident
-SELECT * FROM servicenow.incident
-SELECT * FROM "servicenow"."incident"
-SELECT * FROM servicenow."incident"
-```
-
-**Key Behaviors:**
-1.  **Schema Resolution**: The schema prefix (e.g., `servicenow`) is used to route the query to the correct adapter. Quotes are automatically stripped during adapter lookup.
-2.  **Table Name Cleaning**: Adapters receive a clean table name without quotes or schema prefixes (e.g., `incident`), ensuring compatibility with the underlying API.
-
-### 3. Virtual Joins (DuckDB Engine)
-APIs do not support SQL `JOIN` operations natively. WaveQL solves this by embedding an in-memory **DuckDB** instance.
-
-When a query involving a `JOIN` is detected:
-1.  **Disaggregation**: The query is split into sub-queries for each table source.
-2.  **Parallel Fetch**: WaveQL asynchronously fetches the relevant filtered data from each API.
-3.  **Arrow Loading**: The results are zero-copy loaded into DuckDB as Arrow tables.
-4.  **Local Execution**: The final `JOIN` and aggregation logic is executed locally within DuckDB.
-
-### 4. Async Concurrency Model
-WaveQL is optimized for high-throughput environments. 
-*   **I/O Bound**: Since API calls are I/O bound, we use standard `asyncio` / `anyio`.
-*   **Pagination**: Pagination pages are fetched proactively (prefetching) in background tasks to ensure the cursor always has data ready for the consumer.
-
-## Data Model
-
-WaveQL normalizes all API responses into **Apache Arrow** tables.
-*   **Why Arrow?** It provides a columnar memory format that is standard across modern data tools (Pandas, Polars, Spark).
-*   **Type Consistency**: Adapters are responsible for mapping API-specific types (e.g., ServiceNow `GlideDateTime`) to standard Arrow timestamps.
-
-### 5. Change Data Capture (CDC) Architecture
-The CDC module (`waveql.cdc`) allows for real-time data streaming.
-1.  **Providers**: Each adapter implements a CDC Provider (e.g., `ServiceNowCDCProvider`) that defines the strategy for detecting changes (Polling vs Webhooks).
-2.  **State Management**: The stream maintains a cursor (timestamp or ID) to ensure reliable resumption after restart.
-3.  **Unified Interface**: The `CDCStream` normalizes events into a standard `Change` object (Insert/Update/Delete) regardless of the source API.
-
-### 6. WebAssembly (Wasm) Architecture
-
-WaveQL is designed to run in browser environments via **Pyodide** (CPython complied to WebAssembly). This allows you to run SQL-on-API logic directly in a frontend React/Vue app without a backend server.
-
-**Key Adaptations:**
-*   **Networking**: Standard `socket`-based libraries (`psycopg2`, `requests` sync) do not work in the browser sandbox. WaveQL detects this via `waveql.utils.wasm.is_wasm()`.
-*   **Async-First**: In Wasm, the main thread cannot block. WaveQL adapters automatically route traffic through `httpx` with a Pyodide-compatible transport (e.g., `pyodide-http` or `fetch` wrappers).
-*   **Execution**:
-    *   **Browser**: `fetch_async()` executes via JavaScript `fetch` API.
-    *   **Result**: Data is returned as Arrow Tables, which are efficiently accessible by JavaScript visualization libraries (e.g., Observable Plot, Deck.gl).
-
-This architecture enables "Serverless SQL" — querying Salesforce/ServiceNow directly from the client's browser.
+## Browser (Wasm)
+WaveQL runs in Pyodide. `is_wasm()` switch routes traffic via `pyodide-http` since raw sockets are unavailable.

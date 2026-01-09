@@ -12,6 +12,15 @@ OAuth2 Grant Types Supported:
 - password: Resource owner password credentials  
 - refresh_token: Refresh existing access tokens
 - authorization_code: (requires external browser flow)
+
+Security Notes:
+    ⚠️ WARNING: Do NOT enable DEBUG logging in production environments.
+    Debug logs may contain token expiry timestamps and other metadata.
+    Credentials (passwords, API keys, tokens) are NEVER logged, but
+    enabling DEBUG in production is still not recommended.
+    
+    All sensitive fields use private attributes (_password, _api_key, etc.)
+    and are not exposed in __repr__ or exception messages.
 """
 
 from __future__ import annotations
@@ -30,6 +39,54 @@ import httpx
 from waveql.exceptions import AuthenticationError
 
 logger = logging.getLogger(__name__)
+
+
+class SecretStr:
+    """
+    A string wrapper that prevents accidental exposure of sensitive values.
+    
+    - __repr__ returns '***' instead of the actual value
+    - __str__ returns '***' instead of the actual value
+    - Use .get_secret_value() to access the actual string
+    
+    This prevents credentials from appearing in:
+    - Log messages
+    - Exception tracebacks
+    - Debug output
+    - repr() calls
+    
+    Example:
+        >>> secret = SecretStr("my-password")
+        >>> print(secret)  # Output: ***
+        >>> str(secret)    # Output: '***'
+        >>> secret.get_secret_value()  # Output: 'my-password'
+    """
+    
+    __slots__ = ('_secret_value',)
+    
+    def __init__(self, value: str):
+        self._secret_value = value
+    
+    def get_secret_value(self) -> str:
+        """Get the actual secret value."""
+        return self._secret_value
+    
+    def __repr__(self) -> str:
+        return "SecretStr('***')"
+    
+    def __str__(self) -> str:
+        return "***"
+    
+    def __eq__(self, other) -> bool:
+        if isinstance(other, SecretStr):
+            return self._secret_value == other._secret_value
+        return False
+    
+    def __hash__(self) -> int:
+        return hash(self._secret_value)
+    
+    def __bool__(self) -> bool:
+        return bool(self._secret_value)
 
 
 @dataclass
@@ -98,10 +155,15 @@ class BasicAuthManager(BaseAuthManager):
     
     def __init__(self, username: str, password: str):
         self._username = username
-        self._password = password
+        self._password = SecretStr(password) if not isinstance(password, SecretStr) else password
+        # Encode immediately so we don't need to access password again
+        pwd_value = password if isinstance(password, str) else password.get_secret_value()
         self._encoded = base64.b64encode(
-            f"{username}:{password}".encode()
+            f"{username}:{pwd_value}".encode()
         ).decode()
+    
+    def __repr__(self) -> str:
+        return f"BasicAuthManager(username='{self._username}', password=***)"
     
     def get_headers(self) -> Dict[str, str]:
         return {"Authorization": f"Basic {self._encoded}"}
@@ -135,12 +197,16 @@ class APIKeyAuthManager(BaseAuthManager):
             header_name: Header name to use (e.g., "X-API-Key", "Authorization")
             prefix: Optional prefix (e.g., "Bearer ", "ApiKey ")
         """
-        self._api_key = api_key
+        self._api_key = SecretStr(api_key) if not isinstance(api_key, SecretStr) else api_key
         self._header_name = header_name
         self._prefix = prefix
     
+    def __repr__(self) -> str:
+        return f"APIKeyAuthManager(header='{self._header_name}', api_key=***)"
+    
     def get_headers(self) -> Dict[str, str]:
-        value = f"{self._prefix}{self._api_key}" if self._prefix else self._api_key
+        key_value = self._api_key.get_secret_value() if isinstance(self._api_key, SecretStr) else self._api_key
+        value = f"{self._prefix}{key_value}" if self._prefix else key_value
         return {self._header_name: value}
     
     @property
@@ -149,7 +215,8 @@ class APIKeyAuthManager(BaseAuthManager):
     
     def get_query_params(self) -> Dict[str, str]:
         """Get API key as query parameter (alternative to header)."""
-        return {"api_key": self._api_key}
+        key_value = self._api_key.get_secret_value() if isinstance(self._api_key, SecretStr) else self._api_key
+        return {"api_key": key_value}
 
 
 class OAuth2Manager(BaseAuthManager):

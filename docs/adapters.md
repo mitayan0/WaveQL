@@ -1,210 +1,86 @@
-# Adapter Reference
+# Adapters
 
-Adapters are the pluggable components that teach WaveQL how to talk to a specific API or data source.
+## Capability Matrix
 
-## Feature Matrix
-
-| Adapter | URI Scheme | Fetch & Pushdown | Aggregation | Insert | Update | Delete | Schema | Notes |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **ServiceNow** | `servicenow://` | ✅ Full (`sysparm_query`) | ✅ Server | ✅ | ✅ | ✅ | ✅ Dynamic | Parallel fetching, CDC. |
-| **Salesforce** | `salesforce://` | ✅ Full (SOQL) | ✅ Server | ✅ | ✅ | ✅ | ✅ Dynamic | Bulk API support. |
-| **Jira** | `jira://` | ✅ Full (JQL) | ✅ Client | ✅ | ✅ | ✅ | ✅ Dynamic | Supports Projects, Issues, Users. |
-| **HubSpot** | `hubspot://` | ✅ Full (Search API) | ✅ Client* | ✅ | ✅ | ✅ | ✅ Dynamic | *Smart COUNT uses API total. |
-| **Shopify** | `shopify://` | ✅ Partial | ✅ Client* | ✅ | ✅ | ✅ | ⚠️ Inferred | *Smart COUNT uses /count.json. |
-| **Zendesk** | `zendesk://` | ✅ Full (Search API) | ✅ Client* | ✅ | ✅ | ✅ | ⚠️ Inferred | *Smart COUNT uses API count. |
-| **Stripe** | `stripe://` | ✅ Full (Search/List) | ✅ Client* | ✅ | ✅ | ✅ | ⚠️ Inferred | *Smart COUNT uses total_count. |
-| **SQL Database**| `postgresql://`, etc.| ✅ Full (SQLAlchemy) | ✅ Server | ✅ | ✅ | ✅ | ✅ Dynamic | Supports any SQLAlchemy dialect. |
-| **Cloud Storage**| `s3://`, `gs://` | ✅ Full (DuckDB) | ✅ DuckDB | ❌ | ❌ | ❌ | ✅ DuckDB | Parquet, CSV, JSON, **Delta**, **Iceberg**. Native Async. |
-| **REST** | `http://` | ✅ Param Pushdown | ❌ | ✅ | ✅ | ✅ | ✅ Config | Configurable endpoints. Async fallback. |
-| **Singer Taps** | `singer://` | ✅ Local Stream | ❌ | ❌ | ❌ | ❌ | ✅ JSON | Wraps Singer.io taps. |
-| **Google Sheets**| `google_sheets://` | ⚠️ Client-side | ✅ Client | ✅ | ⚠️ Partial | ❌ | ⚠️ Inferred | Sheets as tables. |
+| Adapter | URI Scheme | Pushdown | Aggregation | Write | Schema | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **ServiceNow** | `servicenow://` | `sysparm_query` | ✅ Server | ✅ CRUD | ✅ Dynamic | Parallel fetch, CDC |
+| **Salesforce** | `salesforce://` | `SOQL` | ✅ Server | ✅ CRUD | ✅ Dynamic | Bulk API |
+| **Jira** | `jira://` | `JQL` | ✅ Client | ✅ Issue | ✅ Dynamic | Projects/Issues/Users |
+| **HubSpot** | `hubspot://` | Search API | ✅ Smart* | ✅ CRUD | ✅ Dynamic | *Optimized COUNT(*) |
+| **Shopify** | `shopify://` | Partial | ✅ Smart* | ✅ CRUD | ⚠️ Inferred | *Count Endpoint |
+| **Zendesk** | `zendesk://` | Search API | ✅ Smart* | ✅ CRUD | ⚠️ Inferred | |
+| **Stripe** | `stripe://` | Search/List | ✅ Smart* | ✅ CRUD | ⚠️ Inferred | |
+| **SQL DB** | `postgresql://` | Full SQL | ✅ Server | ✅ CRUD | ✅ Dynamic | SQLAlchemy wrapper |
+| **Cloud Storage** | `s3://`, `gs://` | DuckDB | ✅ DuckDB | ❌ Read-Only | ✅ Parquet | Delta Lake / Iceberg |
+| **Generic REST** | `http://` | Params | ❌ | ✅ CRUD | ✅ Config | |
 
 ---
 
-## 1. ServiceNow Adapter
-Connects to the ServiceNow Table API.
-
+## 1. ServiceNow
 *   **URI**: `servicenow://instance.service-now.com`
-*   **Capabilities**:
-    *   Full `sysparm_query` support for filtering.
-    *   **Aggregation Pushdown**: `COUNT`, `MIN`, `MAX`, `AVG`, `SUM`.
-    *   **Change Data Capture**: Stream `insert`/`update` events.
-    *   **Parallel Fetching**: Automatically fetches pages in parallel.
+*   **Pushdown**: `sysparm_query` (e.g., `active=true^priority=1`)
+*   **Tables**: All system tables (`incident`, `cmdb_ci`, etc.)
+*   **Notes**: `display_value` supported in connection params.
 
-**Example:**
 ```sql
 SELECT number, short_description 
 FROM incident 
 WHERE active = true AND priority IN (1, 2)
 ```
 
-## 2. Salesforce Adapter
-Connects to Salesforce REST API / SOQL.
+## 2. Salesforce
+*   **URI**: `salesforce://instance.salesforce.com`
+*   **Pushdown**: Native SOQL.
+*   **Bulk API**: Auto-switches to Bulk API 2.0 for large INSERTs.
+*   **Async**: Full `async/await` support.
 
-*   **URI**: `salesforce://your-instance.my.salesforce.com`
-*   **Capabilities**:
-    *   Native translation to SOQL.
-    *   **Bulk API 2.0**: Automatic usage for large inserts.
-    *   **Async Support**: Fully async-native.
-
-**Example:**
 ```sql
-SELECT Id, Name, Industry FROM Account WHERE Type = 'Customer'
+SELECT Id, Name FROM Account WHERE Industry = 'Tech'
 ```
 
-## 3. Jira Adapter
-Connects to Jira Cloud API v3.
-
+## 3. Jira
 *   **URI**: `jira://domain.atlassian.net`
-*   **Capabilities**:
-    *   Translates SQL `WHERE` to JQL.
-    *   **Virtual Tables**: `issues`, `projects`, `users`, `comments`.
+*   **Pushdown**: JQL translation (`WHERE status='Done'` -> `status = "Done"`).
+*   **Virtual Tables**: `issues` (the main one), `projects`, `users`, `comments`.
 
-**Example:**
 ```sql
-SELECT key, summary FROM issues WHERE project = 'KAN' AND status != 'Done'
+SELECT key, summary FROM issues WHERE project = 'KAN'
 ```
 
-## 4. HubSpot Adapter
-Connects to HubSpot CRM (v3 API).
-
+## 4. HubSpot
 *   **URI**: `hubspot://api.hubapi.com`
-*   **Capabilities**:
-    *   **Search API**: Pushes down filters for Contacts, Companies, Deals, etc.
-    *   **Pagination**: Cursor-based.
+*   **Pushdown**: Search API v3 filters.
+*   **Pagination**: Cursor-based.
+*   **Smart COUNT**: `SELECT COUNT(*) FROM contacts` -> 1 API call (uses metadata).
 
-**Example:**
 ```sql
 SELECT firstname, email FROM contacts WHERE email LIKE '%@example.com'
 ```
 
-## 5. Shopify Adapter
-Connects to Shopify Admin REST API.
+## 5. Cloud Storage (S3/GCS)
+*   **URI**: `s3://bucket/`, `gs://bucket/`, `azure://container/`
+*   **Engine**: Embedded DuckDB.
+*   **Formats**: Parquet, CSV, JSON, **Delta Lake**, **Iceberg**.
 
-*   **URI**: `shopify://shop-name.myshopify.com`
-*   **Capabilities**:
-    *   **Fields**: `orders`, `products`, `customers`.
-    *   **Optimization**: Uses specialized filter params (`status`, `ids`) when possible.
-
-**Example:**
 ```sql
-SELECT id, total_price FROM orders WHERE created_at >= '2024-01-01'
+SELECT * FROM "s3://logs/*.parquet" WHERE year = 2024
 ```
 
-## 6. Zendesk Adapter
-Connects to Zendesk Support API (v2).
+## 6. Generic REST
+*   **URI**: `http://api.example.com`
+*   **Config**: Map tables to endpoints manually via `RESTAdapter`.
+*   **Pushdown**: Param-based filtering.
 
-*   **URI**: `zendesk://subdomain.zendesk.com`
-*   **Capabilities**:
-    *   Translates SQL to Zendesk Search queries (`type:ticket status:open`).
-
-**Example:**
-```sql
-SELECT id, subject FROM tickets WHERE status = 'open'
-```
-
-## 7. Stripe Adapter
-Connects to Stripe API (v1).
-
-*   **URI**: `stripe://api.stripe.com`
-*   **Capabilities**:
-    *   **Hybrid Fetch**: Uses basic List API for full scans, Search API for filtered queries.
-    *   **Tables**: `charges`, `customers`, `invoices`, `subscriptions`.
-
-**Example:**
-```sql
-SELECT id, amount, status FROM charges LIMIT 50
-```
-
-## 8. SQL Database Adapter
-Connects to any SQLAlchemy-supported database (Postgres, MySQL, SQL Server, Oracle, etc.).
-
-*   **URI**: Standard connection strings (e.g., `postgresql://user:pass@localhost/db`)
-*   **Capabilities**:
-    *   Pass-through SQL execution.
-    *   Predicate pushdown for `WHERE`, `ORDER BY`, `LIMIT`.
-    *   Full CRUD support.
-
-**Example:**
-```sql
-SELECT * FROM users WHERE active = true
-```
-
-## 9. Cloud Storage Adapter
-Query data directly from object storage and Data Lakes.
-
-*   **URIs**: `s3://`, `gs://`, `azure://`, `az://`
-*   **Formats**: Parquet, CSV, JSON, **Delta Lake**, **Apache Iceberg**.
-*   **Capabilities**:
-    *   **Engine**: Powered by embedded DuckDB.
-    *   **Read-Only**: Optimized for analytics (SELECT-only).
-
-**Example:**
-```sql
--- Query Parquet
-SELECT * FROM "s3://bucket/data/*.parquet" WHERE year = 2024
-
--- Query Delta Table
-SELECT * FROM delta_table('s3://bucket/delta-table/')
-```
-
-## 10. Google Sheets Adapter
-Query spreadsheets as tables.
-
-*   **URI**: Spreadsheet ID or `google_sheets://ID`
-*   **Capabilities**:
-    *   Treats each tab ("Sheet1") as a table.
-    *   **Client-side Filtering**: Fetches data then filters in memory.
-
-**Example:**
-```sql
-SELECT Name, Email FROM Sheet1 WHERE Status = 'Active'
-```
-
-## 11. Generic REST Adapter
-Connects to any standard REST API with configurable endpoints.
-
-*   **URI**: `http://api.example.com` or `https://api.example.com`
-*   **Capabilities**:
-    *   **Configurable Endpoints**: Map tables to URL paths (e.g., `users` -> `/api/v1/users`).
-    *   **Predicate Pushdown**: JSON-based or Query-param based filtering.
-    *   **Async Support**: Full async wrapper support.
-    *   **Rate Limiting**: Automatic backoff on HTTP 429.
-
-**Example:**
-```sql
-SELECT id, name FROM users WHERE role = 'admin'
-```
-
-## 12. Singer Taps Adapter
-Wrapper for the Singer.io ecosystem (open-source connectors).
-
-*   **URI**: `singer://tap-github` (Use tap command as host)
-*   **Capabilities**:
-    *   **Access**: Connect to 300+ existing Singer taps (Salesforce, Zendesk, Postgres, etc.).
-    *   **Streams**: Maps Singer "streams" to tables.
-    *   **Filtering**: Client-side mostly, unless tap supports catalog selection.
-
-**Example:**
 ```python
-conn = waveql.connect("singer://tap-github", config_path="config.json")
-cursor.execute("SELECT * FROM issues LIMIT 10")
+adapter = RESTAdapter("https://api.com", endpoints={"users": "/v1/users"})
+cursor.execute("SELECT * FROM users WHERE role = 'admin'")
 ```
 
-## Developing Custom Adapters
-
-Implement `BaseAdapter` to support new APIs.
-
+## Custom Adapters
+Inherit `BaseAdapter`. See `AGENTS.md` for implementation details.
 ```python
 from waveql.adapters import BaseAdapter, register_adapter
-
-class MyAdapter(BaseAdapter):
-    def fetch(self, table, predicates=None, ...):
-        # Implementation
-        pass
-
-
+class MyAdapter(BaseAdapter): ...
 register_adapter("myservice", MyAdapter)
 ```
-
-See [Testing & Developer Credentials](testing.md) for details on running integration tests.

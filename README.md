@@ -9,225 +9,54 @@
   <em>Query ServiceNow, Salesforce, Jira, and more using standard SQL.</em>
 </p>
 
-<p align="center">
-  <a href="https://pypi.org/project/waveql/"><img src="https://img.shields.io/pypi/v/waveql?color=00d4ff&style=flat-square" alt="PyPI"></a>
-  <a href="https://github.com/mitayan0/WaveQL/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License"></a>
-  <a href="#"><img src="https://img.shields.io/badge/python-3.9+-3776ab?style=flat-square&logo=python&logoColor=white" alt="Python Version"></a>
-  <a href="#"><img src="https://img.shields.io/badge/async-supported-green?style=flat-square" alt="Async Support"></a>
-</p>
-
 ---
 
-**WaveQL** is the **Universal SQL Connector** for your modern data stack.
+WaveQL unifies **SaaS APIs** (ServiceNow, Salesforce, Hubspot), **Databases**, and **Files** under a standard SQL interface. It translates your SQL into optimized API calls (pushing down predicates like `WHERE` and `ORDER BY`) and handles pagination/auth automatically.
 
-It unifies **SaaS APIs** (ServiceNow, Salesforce, Hubspot, Zendesk), **Databases** (Postgres, MySQL), and **Files** (CSV, Parquet, Excel) under a single, standard SQL interface.
-
-Instead of writing custom scripts for every data source, use WaveQL to:
-*   **Query** live API data using SQL.
-*   **Join** complex data sources (e.g., "Join ServiceNow Incidents with a local Excel sheet of VIP users").
-*   **Stream** changes in real-time.
-
-Built for data engineers and developers, it translates your SQL queries into optimized API calls (pushing down predicates like `WHERE` and `ORDER BY`) and handles authentications automatically.
-
-## Why WaveQL?
-
-*   **Universal Adapter System**: Connect to ServiceNow, Salesforce, HubSpot, Shopify, Zendesk, Stripe, Singer Taps, Google Sheets, Cloud Storage (S3/GCS), and Databases.
-*   **Intelligent Query Pushdown**: We don't just fetch all data. `WHERE` clauses are translated into native API filters (e.g., JQL, SOQL) for maximum performance.
-*   **Universal Aggregation Support**: Native server-side aggregation for ServiceNow/Salesforce/SQL, and optimized client-side aggregation (Streaming & Smart COUNT) for HubSpot, Shopify, and more.
-*   **High-Scale Streaming**: Memory-efficient RecordBatch streaming with backpressure for million-row datasets.
-*   **Query Result Caching**: Built-in LRU cache with TTL support reduces API calls and speeds up repeated queries.
-*   **Change Data Capture (CDC)**: Real-time streaming of table changes using Polling (for SaaS) or zero-latency WAL streaming (for PostgreSQL).
-*   **Cross-Source JOINs**: Seamlessly join data between your local CSVs, a Jira backlog, and ServiceNow incidents using our DuckDB-powered engine.
-*   **Data Lake Support**: Native support for **Delta Lake** and **Apache Iceberg** formats on S3, GCS, and Azure.
-*   **Async Built-in**: Built on `httpx` and `anyio` for high-concurrency, non-blocking applications.
-*   **Data Science Ready**: Native integrations with Pandas, PyArrow, and SQLAlchemy (works with Superset!).
-
-## Installation
+## 🚀 Quick Start
 
 ```bash
 pip install waveql
-# For PostgreSQL support:
-pip install waveql[postgres]
 ```
-
-Or install from source:
-
-```bash
-git clone https://github.com/mitayan0/WaveQL.git
-cd WaveQL
-pip install -e .
-```
-
-## Quick Start
-
-### 1. Querying ServiceNow
 
 ```python
 import waveql
 
-# Connect securely
-conn = waveql.connect(
-    "servicenow://instance.service-now.com",
-    username="admin",
-    password="your-password"
-)
+# Connect to any source
+conn = waveql.connect("servicenow://instance.service-now.com", username="admin", password="password")
 
-# Execute standard SQL
+# Run standard SQL (We handle the API translation)
 cursor = conn.cursor()
 cursor.execute("""
-    SELECT number, short_description, priority 
+    SELECT number, short_description 
     FROM incident 
-    WHERE state = 1 AND priority <= 2
-    ORDER BY number DESC
-    LIMIT 10
+    WHERE priority = 1 
+    ORDER BY number DESC 
+    LIMIT 5
 """)
 
-# Work with results
-for row in cursor:
-    print(f"[{row.number}] {row.short_description}")
-
-# Or get a Pandas DataFrame instantly
-
-df = cursor.to_df()
-print(df.head())
+print(cursor.to_df())  # Returns Pandas DataFrame
 ```
 
-### 2. Async Support & CDC
+## 📚 Documentation
 
-Building a modern event-driven app?
+| Topic | Description |
+| :--- | :--- |
+| **[Adapters](docs/adapters.md)** | Supported sources (ServiceNow, Salesforce, etc.) |
+| **[Architecture](docs/architecture.md)** | System diagram & components |
+| **[Configuration](docs/configuration.md)** | Auth, Caching, and Paths |
+| **[Transactions](docs/transactions.md)** | Saga Pattern & Atomic Writes |
+| **[CDC](docs/cdc.md)** | Real-time Change Data Capture |
+| **[Semantic Layer](docs/semantic-layer.md)** | Virtual Views & dbt integration |
 
-```python
-import asyncio
-from waveql import connect_async
+> **Contributors**: Read [AGENTS.md](AGENTS.md).
 
-async def main():
-    async with await connect_async("servicenow://...") as conn:
-        # 1. Async Query
-        cursor = conn.cursor()
-        await cursor.execute("SELECT count(*) FROM incident")
-        print(await cursor.fetchone())
-        
-        # 2. Async Streams
-        async for batch in cursor.stream_batches("SELECT * FROM incident"):
-            print(f"Received batch of {len(batch)} records")
-
-asyncio.run(main())
-```
-
-### 3. The Power of "Join Global"
-
-Combine data from APIs, Files, and Databases in one query.
-
-```python
-# 1. Register a local Excel file
-conn.execute("CREATE TABLE vip_users AS SELECT * FROM 'vips.xlsx'")
-
-# 2. Join ServiceNow Incidents with the Excel file
-# Find high-priority incidents affecting VIP users
-cursor.execute("""
-    SELECT 
-        sn.number as ticket,
-        sn.short_description,
-        vip.name as vip_name,
-        vip.department
-    FROM servicenow.incident sn
-    JOIN vip_users vip ON sn.caller_id = vip.user_id
-    WHERE sn.priority = 1
-""")
-
-for row in cursor:
-    print(f"VIP Alert: {row.vip_name} has ticket {row.ticket}")
-```
-
-### 4. Query Caching
-
-Reduce API calls and speed up repeated queries with built-in caching:
-
-```python
-import waveql
-from waveql import CacheConfig
-
-# Simple caching with 1-minute TTL
-conn = waveql.connect("servicenow://...", cache_ttl=60)
-
-# First query hits the API
-cursor = conn.cursor()
-cursor.execute("SELECT * FROM incident WHERE active=true")
-
-# Second identical query is served from cache instantly!
-cursor.execute("SELECT * FROM incident WHERE active=true")
-
-# Check cache performance
-print(conn.cache_stats.to_dict())
-# {'hits': 1, 'misses': 1, 'hit_rate': '50.0%', 'size_mb': 0.25}
-
-# Advanced: Per-adapter TTL configuration
-config = CacheConfig(
-    default_ttl=300,
-    adapter_ttl={"servicenow": 60, "jira": 120},
-    exclude_tables=["audit_log"]
-)
-conn = waveql.connect("servicenow://...", cache_config=config)
-```
-
-## Supported Adapters
-
-| Adapter | URI Scheme | Features |
-|:--------|:-----------|:---------|
-| **ServiceNow** | `servicenow://` | Table API, **Server Aggregates**, CDC, CRUD |
-| **Salesforce** | `salesforce://` | SOQL Pushdown, **Async CRUD**, Bulk API |
-| **Jira** | `jira://` | JQL Pushdown, Issues/Projects/Users, CRUD |
-| **HubSpot** | `hubspot://` | Search API v3, **Smart COUNT**, CRUD |
-| **Shopify** | `shopify://` | Orders/Products, **Smart COUNT**, CRUD |
-| **Zendesk** | `zendesk://` | Ticket Search, **Smart COUNT**, CRUD |
-| **Stripe** | `stripe://` | Search/List API, **Smart COUNT**, CRUD |
-| **Singer Taps** | `singer://`, `tap://` | **300+ Taps** (GitHub, Slack, etc.) |
-| **SQL DB** | `postgresql://` | Full SQL Passthrough via SQLAlchemy |
-| **Cloud Storage** | `s3://`, `gs://` | Parquet/CSV, **Delta Lake**, **Iceberg** |
-| **Generic REST**| `rest://`, `http://` | Configurable endpoints, JSON, Auth |
-| **Files** | `file://` | CSV, Parquet, Excel, JSON |
-| **Google Sheets** | `google_sheets://` | Spreadsheets as Tables, Read/Write |
-
-## SQL Syntax Support
-
-WaveQL supports ANSI SQL with full compatibility for **schema-qualified** and **quoted identifiers**:
-
-```sql
--- All of these are equivalent and fully supported:
-SELECT * FROM incident
-SELECT * FROM servicenow.incident
-SELECT * FROM "servicenow"."incident"
-SELECT * FROM servicenow."incident"
-```
-
-**Supports**: `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `JOIN`, `GROUP BY`, `ORDER BY`, `LIMIT`, `OFFSET`
-**Aggregates**: `COUNT(*)`, `COUNT(col)`, `SUM`, `AVG`, `MIN`, `MAX`
-
-> ⚡ **Performance Note**: WaveQL automatically optimizes `COUNT(*)` queries using API-native mechanisms (Smart COUNT) for HubSpot, Shopify, Zendesk, and Stripe, reducing execution time from minutes to milliseconds.
-
-
-## Authentication
-
-WaveQL takes the headache out of auth headers.
-
-*   **Basic Auth**: Simple username/password.
-*   **API Key**: Custom headers or query params.
-*   **OAuth2**: Full flow support including token refresh.
-
-```python
-from waveql.auth import AuthManager
-
-# OAuth2 Example
-auth = AuthManager(
-    oauth_token_url="https://login.salesforce.com/services/oauth2/token",
-    oauth_client_id="your_client_id",
-    oauth_client_secret="your_client_secret"
-)
-conn = waveql.connect("salesforce://login.salesforce.com", auth_manager=auth)
-```
-
-
+## ✨ Key Features
+*   **Universal SQL**: Join `servicenow.incident` with `salesforce.account`.
+*   **Smart Pushdown**: `WHERE` converts to JQL/SOQL automatically.
+*   **Zero-Copy**: Built on DuckDB + PyArrow.
+*   **Async Native**: `async/await` throughout.
+*   **Production Ready**: Retries, rate-limiting, and pooling.
 
 ## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT.
