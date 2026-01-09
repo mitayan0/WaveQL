@@ -31,6 +31,8 @@ We are currently building the bridge between raw APIs and AI agents.
 - [x] **Webhook Listener**: Real-time cache invalidation via `WaveQLWebhookServer`.
 - [x] **Wasm Support**: Core engine ported to run inside Pyodide (Browser).
 
+
+
 ---
 
 ## 🔮 Future Horizons
