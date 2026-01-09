@@ -3,6 +3,7 @@
 **The Universal SQL Connector for Modern APIs.**
 
 ## 🚀 Start Here
+*   **[Quick Start](quickstart.md)**: Hello World in 5 minutes.
 *   **[Adapters](adapters.md)**: Capability matrix for ServiceNow, Salesforce, etc.
 *   **[Configuration](configuration.md)**: Env vars, auth, and storage paths.
 
