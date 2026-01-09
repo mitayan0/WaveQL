@@ -31,10 +31,14 @@ class ViewRegistry:
         Initialize the registry.
         
         Args:
-            db_path: Path to SQLite database. Defaults to ~/.waveql/registry.db
+            db_path: Path to SQLite database. If None, uses centralized config.
         """
         if db_path is None:
-            db_path = Path.home() / ".waveql" / "registry.db"
+            try:
+                from waveql.config import get_config
+                db_path = get_config().registry_db
+            except ImportError:
+                db_path = Path.home() / ".waveql" / "registry.db"
         
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)

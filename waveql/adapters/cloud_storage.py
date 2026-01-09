@@ -109,7 +109,11 @@ class CloudCredentials:
     def from_config_file(cls, path: str = None) -> "CloudCredentials":
         """Load credentials from config file."""
         if path is None:
-            path = os.path.expanduser("~/.waveql/credentials.yaml")
+            try:
+                from waveql.config import get_config
+                path = str(get_config().credentials_file)
+            except ImportError:
+                path = os.path.expanduser("~/.waveql/credentials.yaml")
         
         if not os.path.exists(path):
             return cls()

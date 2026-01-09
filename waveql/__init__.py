@@ -78,8 +78,15 @@ from waveql.ai import (
     VectorSearchManager,
 )
 
+# Configuration
+from waveql.config import (
+    WaveQLConfig,
+    get_config,
+    set_config,
+)
 
-__version__ = "0.1.6"
+
+__version__ = "0.1.7"
 __all__ = [
     "connect",
     "WaveQLConnection",
@@ -145,6 +152,10 @@ __all__ = [
     "register_ai_functions",
     "EmbeddingConfig",
     "VectorSearchManager",
+    # Configuration
+    "WaveQLConfig",
+    "get_config",
+    "set_config",
     # DB-API 2.0 globals
     "apilevel",
     "threadsafety",

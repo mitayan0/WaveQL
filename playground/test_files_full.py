@@ -89,7 +89,6 @@ def setup_test_data():
     
     print(f"\n  Data directory: {DATA_DIR}")
     print(f"  Files: {[f.name for f in DATA_DIR.iterdir() if f.is_file()]}")
-    return True
 
 
 def test_csv_basic():
@@ -100,12 +99,13 @@ def test_csv_basic():
     cursor = conn.cursor()
     
     cursor.execute("SELECT * FROM employees LIMIT 3")
-    for row in cursor:
+    rows = cursor.fetchall()
+    assert len(rows) > 0, "Should return rows"
+    for row in rows:
         print(f"  {row['id']}: {row['name']} - {row['department']}")
     
     conn.close()
     print("  ✓ CSV basic queries work")
-    return True
 
 
 def test_json_basic():
@@ -116,12 +116,13 @@ def test_json_basic():
     cursor = conn.cursor()
     
     cursor.execute("SELECT * FROM products LIMIT 3")
-    for row in cursor:
+    rows = cursor.fetchall()
+    assert len(rows) > 0, "Should return rows"
+    for row in rows:
         print(f"  {row['product_id']}: {row['name']} - ${row['price']}")
     
     conn.close()
     print("  ✓ JSON basic queries work")
-    return True
 
 
 def test_parquet_basic():
@@ -132,12 +133,13 @@ def test_parquet_basic():
     cursor = conn.cursor()
     
     cursor.execute("SELECT * FROM sales LIMIT 3")
-    for row in cursor:
+    rows = cursor.fetchall()
+    assert len(rows) > 0, "Should return rows"
+    for row in rows:
         print(f"  {row['sale_id']}: {row['region']} - ${row['amount']:,.2f}")
     
     conn.close()
     print("  ✓ Parquet basic queries work")
-    return True
 
 
 def test_excel_basic():
@@ -147,22 +149,21 @@ def test_excel_basic():
     excel_path = DATA_DIR / 'customers.xlsx'
     if not excel_path.exists():
         print("  ⚠ Skipped: Excel file not found (openpyxl may not be installed)")
-        return True  # Don't fail if Excel file wasn't created
+        return  # Skip if Excel file wasn't created
     
     try:
         conn = waveql.connect(f"file://{excel_path}")
         cursor = conn.cursor()
         
         cursor.execute("SELECT * FROM customers LIMIT 3")
-        for row in cursor:
+        rows = cursor.fetchall()
+        for row in rows:
             print(f"  {row['customer_id']}: {row['name']} ({row['industry']})")
         
         conn.close()
         print("  ✓ Excel basic queries work")
-        return True
     except Exception as e:
         print(f"  ⚠ Excel test skipped: {e}")
-        return True  # Don't fail the whole suite
 
 
 def test_schema_discovery():
@@ -191,7 +192,6 @@ def test_schema_discovery():
         conn.close()
     
     print("  ✓ Schema discovery works for all file types")
-    return True
 
 
 def test_predicate_pushdown():
@@ -214,8 +214,8 @@ def test_predicate_pushdown():
     print(f"  Engineering dept: {len(engineers)} employees")
     
     conn.close()
+    assert len(high_earners) > 0, "Should find high earners"
     print("  ✓ Predicate pushdown works")
-    return True
 
 
 def test_aggregations():
@@ -243,7 +243,6 @@ def test_aggregations():
     
     conn.close()
     print("  ✓ Aggregations work")
-    return True
 
 
 def test_group_by():
@@ -264,7 +263,6 @@ def test_group_by():
     
     conn.close()
     print("  ✓ GROUP BY works")
-    return True
 
 
 def test_order_by():
@@ -281,7 +279,6 @@ def test_order_by():
     
     conn.close()
     print("  ✓ ORDER BY works")
-    return True
 
 
 def test_limit_offset():
@@ -300,8 +297,8 @@ def test_limit_offset():
     print(f"  Page 2: {page2}")
     
     conn.close()
+    assert len(page1) > 0, "Page 1 should have results"
     print("  ✓ LIMIT/OFFSET works")
-    return True
 
 
 def test_csv_insert():
@@ -334,8 +331,8 @@ def test_csv_insert():
     
     # Cleanup
     test_csv.unlink()
+    assert len(rows) >= 2, "Should have at least 2 rows after insert"
     print("  ✓ CSV INSERT works")
-    return True
 
 
 def test_cross_file_join():
@@ -380,8 +377,8 @@ def test_cross_file_join():
     dept_budget_path.unlink()
     db.close()
     
+    assert len(result) > 0, "Join should return results"
     print("  ✓ Cross-file JOINs work")
-    return True
 
 
 def test_directory_source():
@@ -409,8 +406,8 @@ def test_directory_source():
         print(f"    {table}: {result['cnt']} rows")
     
     conn.close()
+    assert len(tables) > 0, "Should find tables"
     print("  ✓ Directory as data source works")
-    return True
 
 
 def test_data_formats():
@@ -432,8 +429,8 @@ def test_data_formats():
     print(f"  Pandas: {len(df)} rows, columns={list(df.columns)}")
     
     conn.close()
+    assert arrow_table.num_rows > 0, "Arrow table should have rows"
     print("  ✓ Multiple data formats work")
-    return True
 
 
 def test_row_access_patterns():
@@ -453,8 +450,8 @@ def test_row_access_patterns():
     print(f"  tuple(row):     {tuple(row)}")
     
     conn.close()
+    assert row is not None, "Should get a row"
     print("  ✓ All access patterns work")
-    return True
 
 
 def test_parquet_aggregations():
@@ -480,7 +477,6 @@ def test_parquet_aggregations():
     
     conn.close()
     print("  ✓ Parquet aggregations work")
-    return True
 
 
 def main():

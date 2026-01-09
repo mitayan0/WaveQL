@@ -235,9 +235,16 @@ class SQLiteStateBackend(StateBackend):
         Initialize SQLite backend.
         
         Args:
-            db_path: Path to SQLite database file (default: .waveql_state.db)
+            db_path: Path to SQLite database file. If None, uses centralized config.
         """
-        self.db_path = db_path or self.DEFAULT_PATH
+        if db_path is None:
+            try:
+                from waveql.config import get_config
+                db_path = str(get_config().cdc_state_db)
+            except ImportError:
+                db_path = self.DEFAULT_PATH
+        
+        self.db_path = db_path
         self._lock = threading.Lock()
         self._init_db()
     
