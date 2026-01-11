@@ -18,13 +18,13 @@ We are currently building the bridge between raw APIs and AI agents.
 - [x] **Cost-Based Optimization (CBO)**:
     - [x] Latency tracking (`avg_latency_per_row`).
     - [x] Parallel scan primitives.
-    - [ ] **Next**: Join re-ordering based on real-time latency stats.
+    - [x] **Join Re-ordering**: Based on real-time latency stats and cardinality.
 
 ### 2. High-Performance Hybrid Querying
 - [x] **Hybrid Hints**: `/*+ HYBRID */` detection to merge live API data with local cache.
-- [ ] **Bind Joins (Smart Chunking)**:
-    - [ ] Auto-split large `IN (...)` predicates into micro-batches to avoid `414 URI Too Long`.
-    - [ ] Parallel execution of chunks.
+- [x] **Bind Joins (Smart Chunking)**:
+    - [x] Auto-split large `IN (...)` predicates into micro-batches to avoid `414 URI Too Long`.
+    - [x] Parallel execution of chunks.
 
 ### 3. Reliability & Systems
 - [x] **Saga Pattern**: Distributed transaction support with compensating transactions.
@@ -39,15 +39,16 @@ We are currently building the bridge between raw APIs and AI agents.
 
 ### Phase 1: Universal Access (Postgres Wire Protocol)
 **Goal**: Trick Tableau, PowerBI, and DBeaver into thinking WaveQL is a standard Postgres DB.
-- [ ] **Postgres Server Emulation**: Implement `pg_wire` (TCP 5432).
-- [ ] **Catalog Emulation**: Mock `pg_catalog` tables so BI tools can inspect schemas.
-- [ ] **Binary Tiling**: Map API JSON types to Postgres Binary Tuples.
+- [x] **Postgres Server Emulation**: Implement `pg_wire` (TCP 5432).
+- [x] **Catalog Emulation**: Mock `pg_catalog` tables so BI tools can inspect schemas.
+- [x] **Binary Tiling**: Map API JSON types to Postgres Binary Tuples.
 
 ### Phase 2: Low-Resource Systems Engineering
 **Goal**: Run efficiently on constrained environments (Serverless / Edge).
-- [ ] **Statistical Cardinality Estimator**: Predict result sizes without counting rows (using history).
-- [ ] **Adaptive Pagination**: Dynamic page sizing (AIMD algorithm) based on network throughput.
-- [ ] **Budget-Constrained Planning**: `SELECT ... WITH BUDGET 500ms`.
+- [x] **Statistical Cardinality Estimator**: Predict result sizes without counting rows (using history).
+- [x] **Adaptive Pagination**: Dynamic page sizing (AIMD algorithm) based on network throughput.
+- [x] **Budget-Constrained Planning**: `SELECT ... WITH BUDGET 500ms`.
+- [x] **Resource Aware Execution**: Unified resource tracking and optimization loop.
 
 ### Phase 3: Enterprise Features
 - [ ] **Row-Level Security**: Policies like `conn.add_policy(table, "department = 'sales'")`.

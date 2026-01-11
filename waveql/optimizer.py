@@ -790,11 +790,17 @@ class QueryOptimizer:
         """
         Reorder join tables based on CBO (Cost-Based Optimization).
         
+        Uses the JoinOptimizer for sophisticated cost-based reordering with:
+        - Real-time latency tracking per table
+        - Selectivity estimation based on predicates
+        - Rate limit awareness
+        - Cardinality estimation using historical data
+        
         Prioritizes tables that are likely to be smaller (lower cardinality)
         and faster to fetch, to serve as the driver for semi-join pushdown.
         
         Cost Formula:
-            Cost = EstimatedRows * AdapterLatency * SelectivityFactor
+            Cost = EstimatedRows * EffectiveLatency * SelectivityFactor
             
         Args:
             tables: List of normalized table names (e.g. "servicenow.incident")
@@ -802,7 +808,31 @@ class QueryOptimizer:
             connection: Connection object to access adapters and their history
             
         Returns:
-            Sorted list of table names
+            Sorted list of table names (cheapest first)
+        """
+        try:
+            # Use the new JoinOptimizer for sophisticated reordering
+            from waveql.join_optimizer import get_join_optimizer
+            optimizer = get_join_optimizer()
+            return optimizer.reorder_joins_simple(tables, predicates, connection)
+        except ImportError:
+            # Fall back to legacy implementation if JoinOptimizer not available
+            logger.debug("JoinOptimizer not available, using legacy reorder_joins")
+            return self._legacy_reorder_joins(tables, predicates, connection)
+        except Exception as e:
+            logger.warning("JoinOptimizer failed: %s, using legacy implementation", e)
+            return self._legacy_reorder_joins(tables, predicates, connection)
+    
+    def _legacy_reorder_joins(
+        self,
+        tables: List[str],
+        predicates: Dict[str, List["Predicate"]],
+        connection: Any,
+    ) -> List[str]:
+        """
+        Legacy implementation of join reordering.
+        
+        This is kept for backward compatibility and as a fallback.
         """
         table_costs = []
         

@@ -506,10 +506,13 @@ class WaveQLConnection(ConnectionMixin):
     
     def ping(self) -> bool:
         """
-        Test if the connection is alive.
+        Test if the WaveQL engine (DuckDB) is alive.
+        
+        Note: This does NOT verify connectivity to remote adapters (e.g. ServiceNow).
+        It only checks that the internal query engine is responsive.
         
         Returns:
-            True if connection is healthy, False otherwise
+            True if engine is healthy, False otherwise
         """
         if self._closed:
             return False

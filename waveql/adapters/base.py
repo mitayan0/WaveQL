@@ -54,6 +54,12 @@ class BaseAdapter(ABC):
     supports_batch: bool = False
     supports_parallel_scan: bool = False # For large scale data fetching
     
+    # Auto-chunking configuration (subclasses can override)
+    # These limits prevent HTTP 414 URI Too Long errors
+    max_in_clause_values: int = 100       # Max values in a single IN (...) clause
+    chunk_threshold: int = 50              # Start chunking when IN has more than this
+    max_parallel_chunks: int = 4           # Max parallel chunk workers
+    
     def __init__(
         self,
         host: str = None,
@@ -454,6 +460,79 @@ class BaseAdapter(ABC):
             if len(self._execution_history) > 100:
                 self._execution_history.pop(0)
 
+    def fetch_with_auto_chunking(
+        self,
+        table: str,
+        columns: List[str] = None,
+        predicates: List["Predicate"] = None,
+        limit: int = None,
+        offset: int = None,
+        order_by: List[tuple] = None,
+        group_by: List[str] = None,
+        aggregates: List[Any] = None,
+    ) -> pa.Table:
+        """
+        Fetch data with automatic chunking for large IN predicates.
+        
+        This method transparently handles large IN (...) clauses by:
+        1. Detecting predicates that exceed max_in_clause_values
+        2. Splitting them into smaller chunks
+        3. Executing chunks in parallel
+        4. Merging results
+        
+        Users don't need to configure anything - it just works.
+        
+        Args:
+            Same as fetch()
+            
+        Returns:
+            PyArrow Table with results
+        """
+        predicates = predicates or []
+        
+        # Check if any IN predicate needs chunking
+        needs_chunking = False
+        for pred in predicates:
+            if (pred.operator.upper() == "IN" 
+                and isinstance(pred.value, (list, tuple))
+                and len(pred.value) > self.chunk_threshold):
+                needs_chunking = True
+                break
+        
+        if not needs_chunking:
+            # Fast path: no chunking needed
+            return self.fetch(
+                table=table,
+                columns=columns,
+                predicates=predicates,
+                limit=limit,
+                offset=offset,
+                order_by=order_by,
+                group_by=group_by,
+                aggregates=aggregates,
+            )
+        
+        # Use chunked executor (internal module)
+        from waveql.chunked_executor import ChunkedExecutor, ChunkConfig
+        
+        config = ChunkConfig(
+            max_chunk_size=self.max_in_clause_values,
+            chunk_threshold=self.chunk_threshold,
+            max_workers=self.max_parallel_chunks,
+        )
+        executor = ChunkedExecutor(self, config)
+        
+        return executor.execute_chunked(
+            table=table,
+            columns=columns,
+            predicates=predicates,
+            limit=limit,
+            offset=offset,
+            order_by=order_by,
+            group_by=group_by,
+            aggregates=aggregates,
+        )
+
     # Performance threshold for client-side aggregation warning
     CLIENT_SIDE_AGGREGATION_WARNING_THRESHOLD = 5000
     
@@ -475,7 +554,7 @@ class BaseAdapter(ABC):
         - AVG: Running sum + count
         - MIN/MAX: Track boundary values
         
-        For GROUP BY queries, uses Pandas for grouping efficiency.
+        For GROUP BY queries, uses PyArrow native grouping (zero-copy).
         
         Performance Note:
             Client-side aggregation requires fetching all matching rows first.
@@ -524,7 +603,7 @@ class BaseAdapter(ABC):
         # If row_count == 0 and NO group_by, fall through to _streaming_aggregate
         # which handles scalar aggregation on empty input (e.g. returns [0] for count)
         
-        # For GROUP BY queries, use Pandas (efficient groupby implementation)
+        # For GROUP BY queries, use PyArrow native grouping
         if group_by:
             return self._aggregate_with_groupby(table, group_by, aggregates)
         
@@ -592,37 +671,49 @@ class BaseAdapter(ABC):
         aggregates: List[Any],
     ) -> pa.Table:
         """
-        Aggregation with GROUP BY using Pandas (efficient groupby).
-        
-        For grouped aggregations, Pandas provides highly optimized implementations.
+        Aggregation with GROUP BY using PyArrow native grouping.
         """
-        df = table.to_pandas()
+        arrow_aggs = []
+        aliases = []
         
-        agg_dict = {}
         for agg in aggregates:
-            func = agg.func.upper()
-            col = agg.column
-            alias = agg.alias or f"{func}({col})"
+            func = agg.func.lower()
+            if func == "avg": func = "mean"
             
-            if func == "COUNT":
-                if col == "*" or col is None:
-                    agg_dict[alias] = (group_by[0], "count")
-                else:
-                    agg_dict[alias] = (col, "count")
-            elif func == "SUM":
-                agg_dict[alias] = (col, "sum")
-            elif func == "AVG":
-                agg_dict[alias] = (col, "mean")
-            elif func == "MIN":
-                agg_dict[alias] = (col, "min")
-            elif func == "MAX":
-                agg_dict[alias] = (col, "max")
+            col = agg.column
+            if col is None or col == "*":
+                # For count(*), we can pick any column or let pyarrow handle "count"
+                # PyArrow "count" works on a column.
+                if func == "count":
+                    col = table.column_names[0]
+            
+            alias = agg.alias or f"{agg.func.upper()}({agg.column})"
+            
+            # (column, function)
+            arrow_aggs.append((col, func))
+            aliases.append(alias)
+            
+        # Perform aggregation
+        grouped = table.group_by(group_by)
+        result = grouped.aggregate(arrow_aggs)
         
-        if not agg_dict:
-            return table.select(group_by)
+        # PyArrow result columns: group_by cols + agg cols
+        # Agg cols usually named like "{col}_{func}".
+        # We need to rename the aggregation columns to match our aliases.
+        # The first N columns are the group_by columns.
         
-        result = df.groupby(group_by, as_index=False).agg(**agg_dict)
-        return pa.Table.from_pandas(result, preserve_index=False)
+        current_names = result.column_names
+        # We expect len(current_names) == len(group_by) + len(arrow_aggs)
+        
+        # Build new column mappings
+        # Keep group_by info as is
+        new_names = current_names[:len(group_by)]
+        new_names.extend(aliases)
+        
+        if len(new_names) == len(current_names):
+             result = result.rename_columns(new_names)
+             
+        return result
     
     def _compute_approximate_aggregates(
         self,
@@ -672,24 +763,48 @@ class BaseAdapter(ABC):
         # Adjust COUNT and SUM based on sampling ratio
         sampling_ratio = total_rows / sample_size
         
-        result_df = result.to_pandas()
+        alias_to_func = {}
         for agg in aggregates:
-            func = agg.func.upper()
-            alias = agg.alias or f"{func}({agg.column})"
+            alias = agg.alias or f"{agg.func.upper()}({agg.column})"
+            alias_to_func[alias] = agg.func.upper()
             
-            if alias in result_df.columns:
-                if func == "COUNT":
-                    result_df[alias] = (result_df[alias] * sampling_ratio).astype(int)
-                elif func == "SUM":
-                    result_df[alias] = result_df[alias] * sampling_ratio
-                # AVG, MIN, MAX don't need adjustment
+        output_arrays = []
+        output_names = result.column_names
+        
+        for col_name in output_names:
+            column = result.column(col_name)
+            # Check if this column corresponds to an aggregate function
+            func = alias_to_func.get(col_name)
+            
+            if func == "COUNT":
+                # Scale and cast to int64
+                scaled = pc.multiply(column, sampling_ratio)
+                output_arrays.append(pc.cast(scaled, pa.int64()))
+            elif func == "SUM":
+                # Scale
+                # Check type, if int, maybe stay int or float? Usually SUM can be float.
+                output_arrays.append(pc.multiply(column, sampling_ratio))
+            else:
+                # AVG, MIN, MAX or Group Key - keep as is
+                output_arrays.append(column)
+        
+        result_scaled = pa.Table.from_arrays(output_arrays, names=output_names)
         
         logger.info(
             f"[{self.adapter_name}] Approximate aggregation: sampled {sample_size:,} of {total_rows:,} rows "
             f"(ratio: {sampling_ratio:.2f}x)"
         )
         
-        return pa.Table.from_pandas(result_df, preserve_index=False)
+        return result_scaled
+
+    def discover_relationships(self) -> List[Any]:
+        """
+        Discover potential relationships (Foreign Keys) within this adapter.
+        
+        Returns:
+            List of RelationshipContract objects
+        """
+        return []
 
     def __repr__(self) -> str:
         """String representation for debugging."""
