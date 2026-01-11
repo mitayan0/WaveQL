@@ -169,6 +169,48 @@ class QueryPlanner:
             logger.debug("Failed to expand views logic: %s", e)
             return sql
 
+    def rewrite_table_ref(self, sql: str, old_table: str, new_table: str) -> str:
+        """
+        Safely rewrite table references in SQL.
+        
+        Replaces all occurrences of `old_table` with `new_table`.
+        Handles aliases, quoting, and formatting transparently using sqlglot.
+        
+        Args:
+            sql: Original SQL query
+            old_table: Normalized name of table to replace
+            new_table: New table name to use
+            
+        Returns:
+            Rewritten SQL string
+        """
+        try:
+            expression = sqlglot.parse_one(sql, read="duckdb")
+            
+            # Normalize old_table for comparison (handle schema.table vs table)
+            # We assume old_table is passed in normalized form logic-wise
+            
+            for table in expression.find_all(exp.Table):
+                # Check if this table matches old_table
+                # We compare standard SQL representation
+                if table.sql() == old_table or table.name == old_table:
+                    # Update table name
+                    # We create a new Identifier/Table node
+                    new_node = sqlglot.to_table(new_table)
+                    # Preserve alias if exists
+                    if table.alias:
+                        new_node.set("alias", table.args.get("alias"))
+                    table.replace(new_node)
+            
+            return expression.sql(dialect="duckdb")
+            
+        except Exception as e:
+            logger.warning(f"Failed to rewrite table ref '{old_table}' -> '{new_table}': {e}. Falling back to string replacement.")
+            # Fallback to simple replace if parser fails (though risky)
+            import re
+            pattern = re.compile(f"\\b{re.escape(old_table)}\\b", re.IGNORECASE)
+            return pattern.sub(new_table, sql)
+
     def parse(self, sql: str) -> QueryInfo:
         """Parse SQL query and extract components."""
         sql = sql.strip()

@@ -13,8 +13,11 @@ Usage:
     print(cursor.fetchall())
 """
 
+# Core
 from waveql.connection import WaveQLConnection
 from waveql.cursor import WaveQLCursor
+
+# Exceptions
 from waveql.exceptions import (
     WaveQLError,
     ConnectionError,
@@ -28,14 +31,11 @@ from waveql.exceptions import (
     TimeoutError,
     ContractViolationError,
 )
-from waveql.contracts import (
-    DataContract,
-    ColumnContract,
-    ContractValidator,
-    ContractRegistry,
-    ContractValidationResult,
-)
+
+# Adapters
 from waveql.adapters import BaseAdapter, register_adapter, get_adapter
+
+# Authentication
 from waveql.auth import (
     AuthManager,
     OAuth2Manager,
@@ -44,14 +44,20 @@ from waveql.auth import (
     JWTAuthManager,
     create_auth_manager,
 )
+
+# Caching
 from waveql.cache import QueryCache, CacheConfig, CacheStats
-from waveql.optimizer import (
-    QueryOptimizer,
-    CompoundPredicate,
-    PredicateType,
-    SubqueryInfo,
-    SubqueryPushdownOptimizer,
+
+# Contracts
+from waveql.contracts import (
+    DataContract,
+    ColumnContract,
+    ContractValidator,
+    ContractRegistry,
+    ContractValidationResult,
 )
+
+# Streaming
 from waveql.streaming import (
     RecordBatchStream,
     AsyncRecordBatchStream,
@@ -71,7 +77,7 @@ from waveql.semantic import (
     DbtModel,
 )
 
-# AI Functions (Vector Search & Embeddings)
+# AI Functions
 from waveql.ai import (
     register_ai_functions,
     EmbeddingConfig,
@@ -85,12 +91,53 @@ from waveql.config import (
     set_config,
 )
 
+# Optimizer
+from waveql.optimizer import (
+    QueryOptimizer,
+    CompoundPredicate,
+    PredicateType,
+    SubqueryInfo,
+    SubqueryPushdownOptimizer,
+)
+
+# Join Optimizer
+from waveql.join_optimizer import (
+    JoinOptimizer,
+    JoinPlan,
+    JoinEdge,
+    TableStats,
+    get_join_optimizer,
+)
+
+# Resource Optimizer (Low-Resource Systems Engineering)
+from waveql.resource_optimizer import (
+    CardinalityEstimator,
+    CardinalityStats,
+    AdaptivePagination,
+    PaginationState,
+    BudgetPlanner,
+    QueryBudget,
+    BudgetUnit,
+    get_cardinality_estimator,
+    get_adaptive_pagination,
+    get_budget_planner,
+    get_resource_executor,
+)
+
+# Note: ChunkedExecutor is now internal - chunking happens automatically
+# via BaseAdapter.fetch_with_auto_chunking(). No user configuration needed.
+
 
 __version__ = "0.1.7"
+
+# Everything users might need - just import from waveql
 __all__ = [
+    # Core
     "connect",
+    "connect_async",
     "WaveQLConnection",
     "WaveQLCursor",
+    
     # Exceptions
     "WaveQLError",
     "ConnectionError",
@@ -102,38 +149,33 @@ __all__ = [
     "PredicatePushdownError",
     "ConfigurationError",
     "TimeoutError",
+    "ContractViolationError",
+    
     # Adapters
     "BaseAdapter",
     "register_adapter",
     "get_adapter",
-    # Authentication
+    
+    # Auth
     "AuthManager",
     "OAuth2Manager",
     "BasicAuthManager",
     "APIKeyAuthManager",
     "JWTAuthManager",
     "create_auth_manager",
-    # Caching
+    
+    # Cache
     "QueryCache",
     "CacheConfig",
     "CacheStats",
-    # Optimizer
-    "QueryOptimizer",
-    "CompoundPredicate",
-    "PredicateType",
-    "SubqueryInfo",
-    "SubqueryPushdownOptimizer",
+    
     # Contracts
     "DataContract",
     "ColumnContract",
     "ContractValidator",
     "ContractRegistry",
     "ContractValidationResult",
-    "ContractViolationError",
-    # Async support
-    "connect_async",
-    "AsyncWaveQLConnection",
-    "AsyncWaveQLCursor",
+    
     # Streaming
     "RecordBatchStream",
     "AsyncRecordBatchStream",
@@ -141,31 +183,67 @@ __all__ = [
     "StreamConfig",
     "StreamStats",
     "create_stream",
-    # Semantic Layer
+    
+    # Semantic
     "VirtualView",
     "VirtualViewRegistry",
     "SavedQuery",
     "SavedQueryRegistry",
     "DbtManifest",
     "DbtModel",
-    # AI Functions
+    
+    # AI
     "register_ai_functions",
     "EmbeddingConfig",
     "VectorSearchManager",
-    # Configuration
+    
+    # Config
     "WaveQLConfig",
     "get_config",
     "set_config",
-    # DB-API 2.0 globals
+    
+    # Optimizer
+    "QueryOptimizer",
+    "CompoundPredicate",
+    "PredicateType",
+    "SubqueryInfo",
+    "SubqueryPushdownOptimizer",
+    
+    # Join Optimizer
+    "JoinOptimizer",
+    "JoinPlan",
+    "JoinEdge",
+    "TableStats",
+    "get_join_optimizer",
+    
+    # Resource Optimizer (Low-Resource Systems Engineering)
+    "CardinalityEstimator",
+    "CardinalityStats",
+    "AdaptivePagination",
+    "PaginationState",
+    "BudgetPlanner",
+    "QueryBudget",
+    "BudgetUnit",
+    "get_cardinality_estimator",
+    "get_adaptive_pagination",
+    "get_budget_planner",
+    "get_resource_executor",
+    
+    # Async
+    "AsyncWaveQLConnection",
+    "AsyncWaveQLCursor",
+    
+    # DB-API 2.0
     "apilevel",
     "threadsafety",
     "paramstyle",
+    "__version__",
 ]
 
 # DB-API 2.0 compliance
 apilevel = "2.0"
-threadsafety = 1  # Threads may share module but not connections
-paramstyle = "qmark"  # Question mark style: WHERE id = ?
+threadsafety = 1
+paramstyle = "qmark"
 
 
 def connect(
@@ -177,7 +255,6 @@ def connect(
     password: str = None,
     api_key: str = None,
     oauth_token: str = None,
-    # Cache configuration
     cache_ttl: float = None,
     cache_config: CacheConfig = None,
     enable_cache: bool = True,
@@ -187,39 +264,23 @@ def connect(
     Create a new WaveQL connection.
     
     Args:
-        connection_string: URI-style connection (e.g., "servicenow://instance.service-now.com")
-        adapter: Adapter type if not using connection_string
-        host: Host/instance URL
+        connection_string: URI (e.g., "servicenow://instance.service-now.com")
         username: Username for Basic Auth
         password: Password for Basic Auth
-        api_key: API key for API Key auth
+        api_key: API key authentication
         oauth_token: OAuth2 access token
-        cache_ttl: Cache TTL in seconds (default: 300). Set to 0 to disable caching.
-        cache_config: Full CacheConfig object for advanced configuration
-        enable_cache: Whether to enable query caching (default: True)
-        **kwargs: Additional adapter-specific options
+        cache_ttl: Cache TTL in seconds (default: 300)
+        enable_cache: Enable query caching (default: True)
         
     Returns:
-        WaveQLConnection instance
+        WaveQLConnection
         
     Examples:
-        # Using connection string with default caching (5 min TTL)
-        conn = waveql.connect("servicenow://myinstance.service-now.com",
-                              username="admin", password="secret")
-        
-        # Disable caching
-        conn = waveql.connect("servicenow://...", enable_cache=False)
-        
-        # Custom cache TTL (1 minute)
-        conn = waveql.connect("servicenow://...", cache_ttl=60)
-        
-        # Advanced cache configuration
-        conn = waveql.connect("servicenow://...",
-                              cache_config=CacheConfig(
-                                  default_ttl=300,
-                                  max_memory_mb=256,
-                                  adapter_ttl={"servicenow": 60}
-                              ))
+        >>> conn = waveql.connect("servicenow://myinstance.service-now.com",
+        ...                       username="admin", password="secret")
+        >>> cursor = conn.cursor()
+        >>> cursor.execute("SELECT * FROM incident LIMIT 10")
+        >>> rows = cursor.fetchall()
     """
     return WaveQLConnection(
         connection_string=connection_string,
@@ -245,16 +306,19 @@ async def connect_async(
     password: str = None,
     api_key: str = None,
     oauth_token: str = None,
-    # Cache configuration
     cache_ttl: float = None,
     cache_config: CacheConfig = None,
     enable_cache: bool = True,
     **kwargs
 ) -> "AsyncWaveQLConnection":
     """
-    Create a new asynchronous WaveQL connection.
+    Create an async WaveQL connection.
     
-    Same parameters as connect(), with full async/await support.
+    Example:
+        >>> conn = await waveql.connect_async("servicenow://...")
+        >>> cursor = conn.cursor()
+        >>> await cursor.execute("SELECT * FROM incident")
+        >>> rows = await cursor.fetchall()
     """
     from waveql.async_connection import AsyncWaveQLConnection
     

@@ -18,21 +18,47 @@ We scan the `WHERE` clause.
 -   `description LIKE '%error%'`: **Unsafe** for some APIs (like simple REST endpoints), Safe for SQL databases.
 -   `created_at > NOW() - INTERVAL 1 DAY`: **Complex**. Transformed into absolute timestamps (e.g., `created_at > '2023-10-27'`) before pushing.
 
-### Phase 2: Join Reordering (Star Schema)
-If joining `Salesforce` (Network, Slow) with `Local CSV` (Disk, Fast).
--   **Bad Plan**: Fetch Salesforce -> For each row, scan CSV.
--   **Good Plan**: Load CSV into DuckDB -> Fetch filtered Salesforce -> Hash Join in DuckDB.
+### Phase 2: Join Reordering with Real-Time Latency Stats
 
-WaveQL currently defaults to **"Fetch All required, then Join locally"** for cross-adapter joins, relying on DuckDB's internal optimizer for the heavy lifting once data is in memory.
+WaveQL uses implicit **JoinOptimizer** for cost-based join reordering:
 
-## 3. Cost-Based Estimation (Future Work)
-We are building a `stats` interface where adapters can report:
--   `approx_row_count()`
--   `is_indexed(column)`
+```python
+# The optimizer learns from each query execution
+from waveql.join_optimizer import get_join_optimizer
+stats = get_join_optimizer().get_all_stats()
+# {'servicenow.incident': {'avg_latency_per_row': 0.002, 'avg_row_count': 500, ...}}
+```
 
-This will allow us to choose between `NESTED LOOP JOIN` (good for small left-side) and `HASH JOIN` (good for bulk).
+**Cost Model:**
+```
+Cost(table) = EstimatedRows × EffectiveLatency × (1 + log(rows)/10)
+```
+
+**Features:**
+- **Per-table latency tracking**: Each table's response time is tracked individually using EMA.
+- **Selectivity estimation**: Predicates reduce estimated row counts (= → 10%, IN → varies by value count).
+- **Rate limit awareness**: Tables that recently hit rate limits get penalized in the cost model.
+- **Semi-join pushdown detection**: When the first table is much smaller, we use it to filter the second.
+
+If joining `Salesforce` (Network, Slow) with `Local CSV` (Disk, Fast):
+-   **Bad Plan**: Fetch Salesforce → For each row, scan CSV.
+-   **Good Plan**: Load CSV into DuckDB → Fetch filtered Salesforce → Hash Join in DuckDB.
+
+## 3. Cost-Based Optimization (Implemented)
+
+The `JoinOptimizer` tracks per-table statistics:
+- `avg_latency_per_row`: Running average (EMA α=0.3) of fetch latency
+- `p95_latency_per_row`: 95th percentile for outlier detection
+- `avg_row_count`: Historical average rows returned
+- `rate_limit_hits`: Count of 429 responses
+
+These stats are updated **automatically** after each fetch, enabling the optimizer to adapt to:
+- Network condition changes
+- API rate limiting patterns
+- Data volume fluctuations
 
 ## 4. Federated Grouping
 `SELECT count(*) FROM table`
 -   **Optimized**: Send `?summary=true` or `HEAD` request to API.
 -   **Fallback**: Fetch all IDs, count in Python. (We try to avoid this).
+

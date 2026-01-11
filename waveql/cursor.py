@@ -13,6 +13,12 @@ import pyarrow as pa
 from waveql.exceptions import QueryError
 from waveql.query_planner import QueryPlanner
 from waveql.observability import QueryPlan
+from waveql.resource_optimizer import (
+    get_budget_planner,
+    get_cardinality_estimator,
+    get_adaptive_pagination,
+    get_resource_executor,
+)
 
 if TYPE_CHECKING:
     from waveql.connection import WaveQLConnection
@@ -89,8 +95,17 @@ class WaveQLCursor:
         # Query planner for predicate extraction
         self._planner = QueryPlanner()
         
+        # Budget planner for WITH BUDGET queries
+        self._budget_planner = get_budget_planner()
+        
+        # Resource executor for unified optimization
+        self._resource_executor = get_resource_executor(connection)
+        
         # Last execution plan
         self.last_plan: Optional[QueryPlan] = None
+        
+        # Budget from last query (if specified)
+        self.last_budget = None
     
     @property
     def description(self) -> Optional[List[Tuple]]:
@@ -124,19 +139,44 @@ class WaveQLCursor:
             
         Returns:
             Self for method chaining
+            
+        Budget-Constrained Queries:
+            Supports `WITH BUDGET <time>` syntax for resource-limited execution.
+            Example: `SELECT * FROM incidents WITH BUDGET 500ms`
+            
+            Supported units: ms, s/seconds, rows
+            
+            When budget is exhausted, partial results are returned.
+            Check `cursor.last_budget.is_exhausted` for status.
         """
         if self._closed:
             raise QueryError("Cursor is closed")
+        
+        # Parse budget constraint if present (e.g., "WITH BUDGET 500ms")
+        cleaned_operation, budget = self._budget_planner.parse_budget(operation)
+        self.last_budget = budget
+        
+        if budget:
+            budget.start()  # Start budget tracking
             
         # Expand virtual views if any (Macro expansion)
         if self._connection._virtual_views:
-            operation = self._planner.expand_views(operation, self._connection._virtual_views)
+            cleaned_operation = self._planner.expand_views(
+                cleaned_operation, self._connection._virtual_views
+            )
         
         # Parse query to extract table, predicates, etc.
-        query_info = self._planner.parse(operation)
+        query_info = self._planner.parse(cleaned_operation)
         
         # Initialize execution plan
         self.last_plan = QueryPlan(sql=operation, is_explain=query_info.is_explain)
+        
+        if budget:
+            self.last_plan.add_step(
+                name=f"Budget: {budget.value} {budget.unit.value}",
+                type="budget",
+                details={"value": budget.value, "unit": budget.unit.value}
+            ).finish()
         
         # Determine which adapter to use
         adapter = self._resolve_adapter(query_info)
@@ -342,6 +382,15 @@ class WaveQLCursor:
                 # Update performance metrics for CBO
                 if data is not None:
                     adapter._update_performance_metrics(len(data), duration)
+                    
+                    # Unified Resource Update: Update all optimizers (CBO, Cardinality, Pagination)
+                    self._resource_executor.record_execution(
+                        adapter_name=adapter.adapter_name,
+                        table_name=clean_table,
+                        rows_fetched=len(data),
+                        duration=duration,
+                        predicates=query_info.predicates
+                    )
                 
                 # Check for source query in metadata
                 if data is not None and data.schema.metadata:
@@ -437,10 +486,8 @@ class WaveQLCursor:
                         details={"engine": "duckdb"}
                     )
                     # Rewrite SQL: Replace table name with temp table name
-                    # We target the FROM clause to be safe
-                    # Pattern matches: FROM <whitespace> tableName <word-boundary>
-                    pattern = re.compile(f"FROM\\s+{re.escape(query_info.table)}\\b", re.IGNORECASE)
-                    rewritten_sql = pattern.sub(f"FROM {temp_name}", query_info.raw_sql, count=1)
+                    # Utilizes safe sqlglot-based rewriting
+                    rewritten_sql = self._planner.rewrite_table_ref(query_info.raw_sql, query_info.table, temp_name)
                     
                     # Execute
                     result = self._connection._duckdb.execute(rewritten_sql).fetch_arrow_table()
@@ -589,6 +636,10 @@ class WaveQLCursor:
  
             # 3. Execution Plan (Cost-Based Optimization)
             # Use optimizer to reorder tables based on latency and selectivity
+            # Note: While we use the CBO's optimal table order, the execution strategy below
+            # is "Greedy Semi-Join Pushdown". We iterate the ordered tables and opportunistically
+            # push predicates to future tables based on results fetched so far.
+            # This aligns with the CBO's plan but handles data movement dynamically.
             from waveql.optimizer import QueryOptimizer
             optimizer = QueryOptimizer()
             sorted_tables = optimizer.reorder_joins(list(all_tables), table_predicates, self._connection)
@@ -613,12 +664,26 @@ class WaveQLCursor:
                     # Combine Base Predicates + Pushed Filters
                     current_preds = table_predicates[table_name] + pushed_filters[table_name]
                     
-                    # Fetch
-                    data = adapter.fetch(
+                    # Fetch with automatic chunking for large IN predicates
+                    # This transparently handles 414 errors by splitting large IN clauses
+                    fetch_start = time.perf_counter()
+                    data = adapter.fetch_with_auto_chunking(
                         table=clean_table, 
                         columns=["*"], 
                         predicates=current_preds
                     )
+                    fetch_duration = time.perf_counter() - fetch_start
+                    
+                    # Updates stats via unified executor
+                    if data is not None:
+                        self._resource_executor.record_execution(
+                            adapter_name=adapter.adapter_name,
+                            table_name=clean_table,
+                            rows_fetched=len(data),
+                            duration=fetch_duration,
+                            predicates=current_preds
+                        )
+                    
                     dataset_cache[table_name] = data
                     fetched_tables.add(table_name)
                     
@@ -629,7 +694,7 @@ class WaveQLCursor:
                     # We need to look at all joins
                     # We look for: ON T1.c1 = T2.c2
                     # If T1 is current table, and T2 is not fetched, push condition to T2.
-                    if data and len(data) > 0 and len(data) < 10000: # Limit pushdown for massive results
+                    if data and len(data) > 0 and len(data) < 100000: # Limit pushdown for massive results
                         for join in query_info.joins:
                             if not join.get("on"): continue
                             
@@ -675,7 +740,7 @@ class WaveQLCursor:
                                             # Remove None
                                             unique_vals = [v for v in unique_vals if v is not None]
                                             
-                                            if unique_vals and len(unique_vals) < 2000: # IN clause limit
+                                            if unique_vals and len(unique_vals) < 50000: # IN clause limit (handled by auto-chunking)
                                                 # Create IN predicate
                                                 pushed_filters[target].append(
                                                     Predicate(column=target_col, operator="IN", value=unique_vals)

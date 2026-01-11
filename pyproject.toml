@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "waveql"
-version = "0.1.6"
+version = "0.1.7"
 description = "Universal Python connector for APIs - Query any data source with SQL"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.9"
 authors = [{ name = "Mitayan Chakma", email = "mitayanchangma@gmail.com" }]
-keywords = ["sql", "api", "connector", "duckdb", "servicenow", "salesforce", "database"]
+keywords = ["sql", "api", "connector", "duckdb", "servicenow", "salesforce", "database", "postgres"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -68,6 +68,7 @@ target-version = ["py39"]
 
 [project.scripts]
 waveql = "waveql.cli:main"
+waveql-server = "waveql.pg_wire.cli:main"
 
 [project.entry-points."sqlalchemy.dialects"]
 waveql = "waveql.sqlalchemy.dialect:WaveQLDialect"
