@@ -156,6 +156,16 @@ class CDCConfig:
     sync_column: str = "sys_updated_on"
     filters: Dict[str, Any] = field(default_factory=dict)
     
+    @property
+    def primary_key(self) -> str:
+        """Alias for key_column."""
+        return self.key_column
+    
+    @primary_key.setter
+    def primary_key(self, value: str) -> None:
+        """Alias for key_column."""
+        self.key_column = value
+    
     def __post_init__(self) -> None:
         """Validate configuration after initialization."""
         if self.poll_interval <= 0:

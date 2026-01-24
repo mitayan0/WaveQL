@@ -21,7 +21,15 @@ from enum import Enum
 
 import duckdb
 import pyarrow as pa
-import anyio
+try:
+    import anyio
+except ImportError:
+    anyio = None
+
+try:
+    import boto3
+except ImportError:
+    boto3 = None
 
 from waveql.adapters.base import BaseAdapter
 from waveql.exceptions import AdapterError, QueryError, ConfigurationError
@@ -349,6 +357,8 @@ class CloudStorageAdapter(BaseAdapter):
     
     async def fetch_async(self, *args, **kwargs) -> pa.Table:
         """Fetch data from cloud storage (async)."""
+        if anyio is None:
+             raise ImportError("anyio is required for async operations")
         return await anyio.to_thread.run_sync(lambda: self.fetch(*args, **kwargs))
     
     def fetch(
@@ -493,6 +503,8 @@ class CloudStorageAdapter(BaseAdapter):
     
     async def get_schema_async(self, table: str) -> List[ColumnInfo]:
         """Get schema from cloud data (async)."""
+        if anyio is None:
+             raise ImportError("anyio is required for async operations")
         return await anyio.to_thread.run_sync(lambda: self.get_schema(table))
     
     def get_schema(self, table: str) -> List[ColumnInfo]:

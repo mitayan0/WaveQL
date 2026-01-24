@@ -91,7 +91,7 @@ class RateLimiter:
                     raise
                 
                 # Calculate delay
-                if retry_after:
+                if retry_after is not None:
                     delay = float(retry_after)
                 else:
                     delay = self._calculate_delay(attempt)
@@ -148,7 +148,7 @@ class RateLimiter:
                 if not should_retry or attempt == self.max_retries:
                     raise
                 
-                if retry_after:
+                if retry_after is not None:
                     delay = float(retry_after)
                 else:
                     delay = self._calculate_delay(attempt)

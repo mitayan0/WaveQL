@@ -670,6 +670,56 @@ class AuthManager(BaseAuthManager):
         """Set callback for OAuth2 token refresh (passthrough)."""
         if isinstance(self._delegate, OAuth2Manager):
             self._delegate.set_token_refresh_callback(callback)
+    
+    # Proxy properties for testing and introspection
+    @property
+    def _username(self) -> Optional[str]:
+        """Proxy to delegate's username (for testing)."""
+        if hasattr(self._delegate, "_username"):
+            return self._delegate._username
+        return None
+    
+    @property
+    def _password(self):
+        """Proxy to delegate's password (for testing)."""
+        if hasattr(self._delegate, "_password"):
+            return self._delegate._password
+        return None
+    
+    @property
+    def _api_key(self):
+        """Proxy to delegate's API key (for testing)."""
+        if hasattr(self._delegate, "_api_key"):
+            return self._delegate._api_key
+        return None
+    
+    @property
+    def _oauth_token(self) -> Optional[str]:
+        """Proxy to delegate's OAuth token (for testing)."""
+        if isinstance(self._delegate, OAuth2Manager) and self._delegate._token:
+            return self._delegate._token.access_token
+        return None
+    
+    @property
+    def _oauth_token_url(self) -> Optional[str]:
+        """Proxy to delegate's OAuth token URL (for testing)."""
+        if isinstance(self._delegate, OAuth2Manager):
+            return self._delegate._token_url
+        return None
+    
+    @property
+    def _oauth_client_id(self) -> Optional[str]:
+        """Proxy to delegate's OAuth client ID (for testing)."""
+        if isinstance(self._delegate, OAuth2Manager):
+            return self._delegate._client_id
+        return None
+    
+    @property
+    def _oauth_client_secret(self) -> Optional[str]:
+        """Proxy to delegate's OAuth client secret (for testing)."""
+        if isinstance(self._delegate, OAuth2Manager):
+            return self._delegate._client_secret
+        return None
 
 
 def create_auth_manager(

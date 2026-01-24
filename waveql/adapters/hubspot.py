@@ -137,7 +137,7 @@ class HubSpotAdapter(BaseAdapter):
                     results.append(row)
                 
                 remaining_limit -= len(batch_results)
-                paging = data.get("paging", {}).get("next", {})
+                paging = (data.get("paging") or {}).get("next", {})
                 after = paging.get("after")
                 
                 if not after or remaining_limit <= 0 or (limit and len(results) >= limit):
@@ -203,8 +203,102 @@ class HubSpotAdapter(BaseAdapter):
             raise AdapterError(f"HubSpot count failed: {e}")
 
     def fetch(self, *args, **kwargs) -> pa.Table:
-        """Synchronous fetch (runs async)."""
-        return anyio.run(lambda: self.fetch_async(*args, **kwargs))
+        """
+        Synchronous fetch that uses sync httpx directly.
+        
+        Note: We use sync httpx here instead of anyio.run() because
+        async DNS resolution fails on some Windows configurations.
+        """
+        return self._fetch_sync(*args, **kwargs)
+    
+    def _fetch_sync(
+        self,
+        table: str,
+        columns: List[str] = None,
+        predicates: List["Predicate"] = None,
+        limit: int = None,
+        offset: int = None,
+        order_by: List[tuple] = None,
+        group_by: List[str] = None,
+        aggregates: List[Any] = None,
+    ) -> pa.Table:
+        """Synchronous fetch using sync httpx."""
+        import httpx
+        
+        object_type = self._get_object_type(table)
+        
+        # Build Search API payload
+        payload = self._build_search_payload(columns, predicates, limit, offset, order_by)
+        
+        results = []
+        after = None
+        remaining_limit = limit if limit else 1000000
+        
+        max_retries = 5
+        base_delay = 1.0  # seconds - longer delay for DNS stability
+        
+        for attempt in range(max_retries):
+            try:
+                url = f"https://{self._host}/crm/v3/objects/{object_type}/search"
+                headers = {}
+                if self._access_token:
+                    headers["Authorization"] = f"Bearer {self._access_token}"
+                
+                with httpx.Client(timeout=30.0) as client:
+                    while True:
+                        current_payload = payload.copy()
+                        if after:
+                            current_payload["after"] = after
+                        
+                        req_limit = min(100, remaining_limit)
+                        current_payload["limit"] = req_limit
+                        
+                        response = client.post(url, json=current_payload, headers=headers)
+                        if response.status_code >= 400:
+                            raise AdapterError(f"HubSpot API error ({response.status_code}): {response.text}")
+                        
+                        data = response.json()
+                        
+                        batch_results = data.get("results", [])
+                        for item in batch_results:
+                            row = {"id": item["id"]}
+                            row.update(item.get("properties", {}))
+                            results.append(row)
+                        
+                        remaining_limit -= len(batch_results)
+                        paging = (data.get("paging") or {}).get("next", {})
+                        after = paging.get("after")
+                        
+                        if not after or remaining_limit <= 0 or (limit and len(results) >= limit):
+                            break
+                
+                if not results:
+                    return pa.table({})
+                
+                table_data = {k: [r.get(k) for r in results] for k in results[0].keys()}
+                result_table = pa.table(table_data)
+                
+                if aggregates:
+                    result_table = self._compute_client_side_aggregates(result_table, group_by, aggregates)
+                
+                return result_table
+                
+            except httpx.ConnectError as e:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(f"HubSpot request failed (attempt {attempt + 1}/{max_retries}), retrying in {delay}s: {e}")
+                    import time
+                    time.sleep(delay)
+                    # Reset state for retry
+                    results = []
+                    after = None
+                    remaining_limit = limit if limit else 1000000
+                else:
+                    raise AdapterError(f"HubSpot search failed after {max_retries} attempts: {e}")
+            except Exception as e:
+                if isinstance(e, AdapterError):
+                    raise
+                raise AdapterError(f"HubSpot search failed: {e}")
 
     def _build_search_payload(
         self,
@@ -369,21 +463,54 @@ class HubSpotAdapter(BaseAdapter):
             raise QueryError(f"HubSpot delete failed: {e}")
 
     async def _request_async(self, method: str, url: str, **kwargs) -> Any:
-        """Internal helper for async requests with auth."""
-        import httpx
+        """
+        Internal helper for async requests with auth and retry logic.
         
-        headers = kwargs.get("headers", {})
+        Uses sync httpx.Client wrapped in anyio.to_thread.run_sync() with
+        retry logic for transient network/DNS failures.
+        """
+        import httpx
+        import anyio
+        import time
+        
+        headers = kwargs.pop("headers", {})
         if self._access_token:
             headers["Authorization"] = f"Bearer {self._access_token}"
-        kwargs["headers"] = headers
         
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.request(method, url, **kwargs)
-            if response.status_code >= 400:
+        max_retries = 5
+        base_delay = 1.0  # seconds - longer delay for DNS stability
+        
+        def sync_request():
+            last_error = None
+            for attempt in range(max_retries):
                 try:
-                    error_data = response.json()
-                    message = error_data.get("message", response.text)
-                except:
-                    message = response.text
-                raise AdapterError(f"HubSpot API error ({response.status_code}): {message}")
-            return response
+                    with httpx.Client(timeout=30.0) as client:
+                        response = client.request(method, url, headers=headers, **kwargs)
+                        if response.status_code >= 400:
+                            try:
+                                error_data = response.json()
+                                message = error_data.get("message", response.text)
+                            except:
+                                message = response.text
+                            raise AdapterError(f"HubSpot API error ({response.status_code}): {message}")
+                        return response
+                except httpx.ConnectError as e:
+                    last_error = e
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)
+                        logger.warning(f"HubSpot request failed (attempt {attempt + 1}/{max_retries}), retrying in {delay}s: {e}")
+                        time.sleep(delay)
+                    else:
+                        raise
+                except httpx.TimeoutException as e:
+                    last_error = e
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)
+                        logger.warning(f"HubSpot request timed out (attempt {attempt + 1}/{max_retries}), retrying in {delay}s: {e}")
+                        time.sleep(delay)
+                    else:
+                        raise AdapterError(f"HubSpot request timed out after {max_retries} attempts: {e}")
+            raise last_error  # Should not reach here
+        
+        # Run sync request in thread to avoid blocking event loop
+        return await anyio.to_thread.run_sync(sync_request)

@@ -10,6 +10,18 @@ For a history of completed features, see [CHANGELOG.md](CHANGELOG.md).
 
 ## 🚧 Active Development (v0.1.7)
 
+### 🚨 Critical Remediation (Priority High) ✅
+**Goal**: Address correctness gaps in Predicate Pushdown and unify the Optimizer.
+- [x] **Optimizer Integration**: Wire up the unused `QueryOptimizer` to `WaveQLCursor`.
+    - Replaced ad-hoc predicate parsing in `QueryPlanner` with `QueryOptimizer` logic.
+    - Properly distinguish between "Pushable" and "Residual" predicates via `_classify_predicates()`.
+- [x] **Safety Net Implementation**:
+    - Implemented Client-Side Filtering Fallback via `_apply_residual_filter()` for predicates that cannot be pushed down.
+    - Prevent silent dropping of complex logic (e.g., `OR` conditions).
+- [x] **Test Suite Reality Check**:
+    - Created `test_optimizer_integration.py` to test actual execution paths.
+    - Added regression tests for Complex Boolean Logic (DeMorgan's laws, mixed AND/OR).
+
 We are currently building the bridge between raw APIs and AI agents.
 
 ### 1. The Intelligence Layer
@@ -50,8 +62,19 @@ We are currently building the bridge between raw APIs and AI agents.
 - [x] **Budget-Constrained Planning**: `SELECT ... WITH BUDGET 500ms`.
 - [x] **Resource Aware Execution**: Unified resource tracking and optimization loop.
 
-### Phase 3: Enterprise Features
-- [ ] **Row-Level Security**: Policies like `conn.add_policy(table, "department = 'sales'")`.
+### Phase 3: Query Provenance for API Federation (RESEARCH)
+**Goal**: Track data lineage across heterogeneous API backends - **novel research area**.
+- [x] **Provenance Tracker**: Thread-safe capture of API calls during query execution.
+- [x] **Where-Provenance**: Track which API/table each row originated from.
+- [x] **Why-Provenance**: Record predicates that caused row inclusion.
+- [x] **How-Provenance**: Document join paths and transformations.
+- [ ] **SQL Extension**: `SELECT *, PROVENANCE() FROM table`.
+- [ ] **Lineage Visualization**: D3.js interactive graph export.
+
+*See [docs/research/query_provenance.md](docs/research/query_provenance.md) for full research plan.*
+
+### Phase 4: Enterprise Features
+- [x] **Row-Level Security**: Policies like `conn.add_policy(table, "department = 'sales'")`.
 - [ ] **Time Travel**: `SELECT * FROM table FOR SYSTEM_TIME AS OF '2023-01-01'`.
 - [ ] **GraphQL Adapter**: SQL-to-GraphQL AST transpiler.
 

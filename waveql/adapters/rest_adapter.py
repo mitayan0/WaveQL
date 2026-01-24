@@ -147,9 +147,8 @@ class RESTAdapter(BaseAdapter):
                     
                     # If we are targetting a specific fetch count (pushed limit), restrain batch size
                     if limit and should_push_limit:
+                        # Ensure we don't fetch more than needed
                         remaining = limit - fetched_count
-                        if remaining <= 0:
-                            break
                         batch_size = min(100, remaining)
                     
                     # Build params: Always request specific batch size and current offset
@@ -424,7 +423,8 @@ class RESTAdapter(BaseAdapter):
             for c in schema_columns:
                 arrow_type = getattr(c, 'arrow_type', None) or pa.string()
                 fields.append(pa.field(c.name, arrow_type))
-            return pa.table({f.name: [] for f in fields})
+            schema = pa.schema(fields)
+            return pa.table({f.name: [] for f in fields}, schema=schema)
         
         # Use new schema utility for proper struct conversion
         from waveql.utils.schema import records_to_arrow_table

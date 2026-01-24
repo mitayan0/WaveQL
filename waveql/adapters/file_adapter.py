@@ -65,7 +65,7 @@ class FileAdapter(BaseAdapter):
     
     async def fetch_async(self, *args, **kwargs) -> pa.Table:
         """Fetch data from file (async)."""
-        return await anyio.to_thread.run_sync(self.fetch, *args, **kwargs)
+        return await anyio.to_thread.run_sync(lambda: self.fetch(*args, **kwargs))
 
     def fetch(
         self,
@@ -123,6 +123,11 @@ class FileAdapter(BaseAdapter):
         
         # If path is a directory, look for table as filename
         if self._path.is_dir():
+            # Check exact match first
+            exact_path = self._path / table
+            if exact_path.exists():
+                return str(exact_path)
+            
             for ext in [".parquet", ".csv", ".json", ".xlsx", ".xls"]:
                 file_path = self._path / f"{table}{ext}"
                 if file_path.exists():
@@ -255,7 +260,7 @@ class FileAdapter(BaseAdapter):
     
     async def insert_async(self, *args, **kwargs) -> int:
         """Append to CSV file (async)."""
-        return await anyio.to_thread.run_sync(self.insert, *args, **kwargs)
+        return await anyio.to_thread.run_sync(lambda: self.insert(*args, **kwargs))
 
     def insert(
         self,
