@@ -111,10 +111,13 @@ class PostgresCDCProvider:
             return self._connection_string
         
         # Try to extract from adapter
-        if hasattr(self.adapter, '_connection_string'):
-            return self.adapter._connection_string
-        if hasattr(self.adapter, '_host'):
-            return self.adapter._host
+        conn_str = getattr(self.adapter, '_connection_string', None)
+        if conn_str:
+            return conn_str
+            
+        host = getattr(self.adapter, '_host', None)
+        if host:
+            return host
         
         raise ValueError("No connection string available for PostgreSQL CDC")
     

@@ -22,7 +22,7 @@ from waveql.exceptions import QueryError
 
 
 # Concrete implementation for testing
-class TestableAdapter(BaseAdapter):
+class MockAdapter(BaseAdapter):
     """Minimal concrete adapter for testing BaseAdapter functionality."""
     
     adapter_name = "testable"
@@ -77,7 +77,7 @@ class TestBaseAdapterInit:
     
     def test_default_initialization(self):
         """Test adapter with default parameters."""
-        adapter = TestableAdapter()
+        adapter = MockAdapter()
         
         assert adapter._host is None
         assert adapter._auth_manager is None
@@ -90,7 +90,7 @@ class TestBaseAdapterInit:
         mock_auth = Mock()
         mock_cache = Mock()
         
-        adapter = TestableAdapter(
+        adapter = MockAdapter(
             host="api.example.com",
             auth_manager=mock_auth,
             schema_cache=mock_cache,
@@ -108,7 +108,7 @@ class TestBaseAdapterInit:
     
     def test_adapter_name(self):
         """Test adapter name is set correctly."""
-        adapter = TestableAdapter()
+        adapter = MockAdapter()
         assert adapter.adapter_name == "testable"
 
 
@@ -140,19 +140,19 @@ class TestHostExtraction:
     
     def test_extract_from_full_url(self):
         """Test extracting host from full URL."""
-        adapter = TestableAdapter(host="https://api.example.com/v1")
+        adapter = MockAdapter(host="https://api.example.com/v1")
         
         assert adapter._pool_host == "api.example.com"
     
     def test_extract_from_plain_host(self):
         """Test extracting host from plain hostname."""
-        adapter = TestableAdapter(host="api.example.com")
+        adapter = MockAdapter(host="api.example.com")
         
         assert adapter._pool_host == "api.example.com"
     
     def test_extract_default_for_none(self):
         """Test default host when none provided."""
-        adapter = TestableAdapter(host=None)
+        adapter = MockAdapter(host=None)
         
         assert adapter._pool_host == "default"
 
@@ -162,7 +162,7 @@ class TestAuthManager:
     
     def test_set_auth_manager(self):
         """Test setting auth manager after init."""
-        adapter = TestableAdapter()
+        adapter = MockAdapter()
         mock_auth = Mock()
         
         adapter.set_auth_manager(mock_auth)
@@ -174,14 +174,14 @@ class TestAuthManager:
         mock_auth = Mock()
         mock_auth.get_headers.return_value = {"Authorization": "Bearer token123"}
         
-        adapter = TestableAdapter(auth_manager=mock_auth)
+        adapter = MockAdapter(auth_manager=mock_auth)
         headers = adapter._get_auth_headers()
         
         assert headers == {"Authorization": "Bearer token123"}
     
     def test_get_auth_headers_no_manager(self):
         """Test getting auth headers without manager returns empty dict."""
-        adapter = TestableAdapter()
+        adapter = MockAdapter()
         headers = adapter._get_auth_headers()
         
         assert headers == {}
@@ -192,7 +192,7 @@ class TestSchemaCache:
     
     def test_set_schema_cache(self):
         """Test setting schema cache after init."""
-        adapter = TestableAdapter()
+        adapter = MockAdapter()
         mock_cache = Mock()
         
         adapter.set_schema_cache(mock_cache)
@@ -206,7 +206,7 @@ class TestSchemaCache:
         mock_schema.columns = [Mock(name="id")]
         mock_cache.get.return_value = mock_schema
         
-        adapter = TestableAdapter(schema_cache=mock_cache)
+        adapter = MockAdapter(schema_cache=mock_cache)
         result = adapter._get_cached_schema("test_table")
         
         assert result == mock_schema.columns
@@ -216,7 +216,7 @@ class TestSchemaCache:
         mock_cache = Mock()
         mock_cache.get.return_value = None
         
-        adapter = TestableAdapter(schema_cache=mock_cache)
+        adapter = MockAdapter(schema_cache=mock_cache)
         result = adapter._get_cached_schema("test_table")
         
         assert result is None
@@ -224,7 +224,7 @@ class TestSchemaCache:
     def test_cache_schema(self):
         """Test caching a schema."""
         mock_cache = Mock()
-        adapter = TestableAdapter(schema_cache=mock_cache)
+        adapter = MockAdapter(schema_cache=mock_cache)
         
         columns = [Mock(name="id"), Mock(name="name")]
         adapter._cache_schema("test_table", columns, ttl=1800)
@@ -237,7 +237,7 @@ class TestIdExtraction:
     
     def test_extract_id_from_predicates(self):
         """Test extracting ID from equality predicate."""
-        adapter = TestableAdapter()
+        adapter = MockAdapter()
         predicates = [
             Predicate(column="id", operator="=", value="12345"),
             Predicate(column="status", operator="=", value="open"),
@@ -249,7 +249,7 @@ class TestIdExtraction:
     
     def test_extract_id_case_insensitive(self):
         """Test that ID extraction is case insensitive."""
-        adapter = TestableAdapter()
+        adapter = MockAdapter()
         predicates = [
             Predicate(column="ID", operator="=", value="abc123"),
         ]
@@ -260,7 +260,7 @@ class TestIdExtraction:
     
     def test_extract_id_missing_raises_error(self):
         """Test that missing ID raises QueryError."""
-        adapter = TestableAdapter()
+        adapter = MockAdapter()
         predicates = [
             Predicate(column="status", operator="=", value="open"),
         ]
@@ -270,14 +270,14 @@ class TestIdExtraction:
     
     def test_extract_id_empty_predicates_raises_error(self):
         """Test that empty predicates raises QueryError."""
-        adapter = TestableAdapter()
+        adapter = MockAdapter()
         
         with pytest.raises(QueryError):
             adapter._extract_id_from_predicates([], "DELETE")
     
     def test_extract_id_none_predicates_raises_error(self):
         """Test that None predicates raises QueryError."""
-        adapter = TestableAdapter()
+        adapter = MockAdapter()
         
         with pytest.raises(QueryError):
             adapter._extract_id_from_predicates(None, "DELETE")
@@ -288,7 +288,7 @@ class TestPerformanceMetrics:
     
     def test_update_performance_metrics(self):
         """Test that performance metrics are updated."""
-        adapter = TestableAdapter()
+        adapter = MockAdapter()
         initial_latency = adapter.avg_latency_per_row
         
         # Update with faster performance
@@ -299,7 +299,7 @@ class TestPerformanceMetrics:
     
     def test_update_metrics_skips_zero_rows(self):
         """Test that zero rows doesn't crash."""
-        adapter = TestableAdapter()
+        adapter = MockAdapter()
         initial_latency = adapter.avg_latency_per_row
         
         adapter._update_performance_metrics(row_count=0, duration=1.0)
@@ -309,7 +309,7 @@ class TestPerformanceMetrics:
     
     def test_execution_history_limited(self):
         """Test that execution history is limited to 100 entries."""
-        adapter = TestableAdapter()
+        adapter = MockAdapter()
         
         for i in range(150):
             adapter._update_performance_metrics(row_count=100, duration=0.1)
@@ -322,7 +322,7 @@ class TestClientSideAggregation:
     
     def test_count_star(self):
         """Test COUNT(*) aggregation."""
-        adapter = TestableAdapter()
+        adapter = MockAdapter()
         table = pa.table({
             "id": [1, 2, 3, 4, 5],
             "value": [10, 20, 30, 40, 50],
@@ -336,7 +336,7 @@ class TestClientSideAggregation:
     
     def test_sum_aggregation(self):
         """Test SUM aggregation."""
-        adapter = TestableAdapter()
+        adapter = MockAdapter()
         table = pa.table({
             "id": [1, 2, 3],
             "amount": [100.0, 200.0, 300.0],
@@ -350,7 +350,7 @@ class TestClientSideAggregation:
     
     def test_avg_aggregation(self):
         """Test AVG aggregation."""
-        adapter = TestableAdapter()
+        adapter = MockAdapter()
         table = pa.table({
             "id": [1, 2, 3],
             "value": [10.0, 20.0, 30.0],
@@ -364,7 +364,7 @@ class TestClientSideAggregation:
     
     def test_min_max_aggregation(self):
         """Test MIN and MAX aggregation."""
-        adapter = TestableAdapter()
+        adapter = MockAdapter()
         table = pa.table({
             "id": [1, 2, 3],
             "value": [10.0, 5.0, 20.0],
@@ -381,7 +381,7 @@ class TestClientSideAggregation:
     
     def test_group_by_aggregation(self):
         """Test aggregation with GROUP BY."""
-        adapter = TestableAdapter()
+        adapter = MockAdapter()
         table = pa.table({
             "status": ["open", "open", "closed", "closed", "closed"],
             "value": [10.0, 20.0, 30.0, 40.0, 50.0],
@@ -397,7 +397,7 @@ class TestClientSideAggregation:
     
     def test_empty_table_aggregation(self):
         """Test aggregation on empty table."""
-        adapter = TestableAdapter()
+        adapter = MockAdapter()
         table = pa.table({
             "id": pa.array([], type=pa.int64()),
             "value": pa.array([], type=pa.float64()),
@@ -411,7 +411,7 @@ class TestClientSideAggregation:
     
     def test_no_aggregates_returns_original(self):
         """Test that no aggregates returns original table."""
-        adapter = TestableAdapter()
+        adapter = MockAdapter()
         table = pa.table({"id": [1, 2, 3]})
         
         result = adapter._compute_client_side_aggregates(table, aggregates=[])
@@ -424,7 +424,7 @@ class TestAutoChunking:
     
     def test_no_chunking_needed(self):
         """Test that small IN clauses don't trigger chunking."""
-        adapter = TestableAdapter()
+        adapter = MockAdapter()
         
         predicates = [
             Predicate(column="status", operator="IN", value=["a", "b", "c"]),
@@ -440,7 +440,7 @@ class TestAutoChunking:
     
     def test_chunking_detected_for_large_in(self):
         """Test that large IN clauses are detected."""
-        adapter = TestableAdapter()
+        adapter = MockAdapter()
         adapter.chunk_threshold = 10  # Low threshold for testing
         
         # Create a large IN predicate
@@ -465,7 +465,7 @@ class TestNotImplementedMethods:
     
     def test_fetch_async_not_implemented(self):
         """Test that fetch_async raises NotImplementedError by default."""
-        adapter = TestableAdapter()
+        adapter = MockAdapter()
         
         import asyncio
         with pytest.raises(NotImplementedError):
@@ -473,7 +473,7 @@ class TestNotImplementedMethods:
     
     def test_get_schema_async_not_implemented(self):
         """Test that get_schema_async raises NotImplementedError by default."""
-        adapter = TestableAdapter()
+        adapter = MockAdapter()
         
         import asyncio
         with pytest.raises(NotImplementedError):
@@ -481,7 +481,7 @@ class TestNotImplementedMethods:
     
     def test_insert_async_not_implemented(self):
         """Test that insert_async raises NotImplementedError by default."""
-        adapter = TestableAdapter()
+        adapter = MockAdapter()
         
         import asyncio
         with pytest.raises(NotImplementedError):
@@ -493,7 +493,7 @@ class TestParallelPlan:
     
     def test_default_parallel_plan(self):
         """Test default parallel plan returns single partition."""
-        adapter = TestableAdapter()
+        adapter = MockAdapter()
         
         plan = adapter.get_parallel_plan("table", n_partitions=4)
         
@@ -503,7 +503,7 @@ class TestParallelPlan:
     
     def test_parallel_scan_not_supported(self):
         """Test that parallel scan is not supported by default."""
-        adapter = TestableAdapter()
+        adapter = MockAdapter()
         
         assert adapter.supports_parallel_scan is False
 
@@ -513,10 +513,10 @@ class TestRepr:
     
     def test_repr(self):
         """Test adapter repr."""
-        adapter = TestableAdapter(host="api.example.com", use_connection_pool=True)
+        adapter = MockAdapter(host="api.example.com", use_connection_pool=True)
         
         repr_str = repr(adapter)
         
-        assert "TestableAdapter" in repr_str
+        assert "MockAdapter" in repr_str
         assert "api.example.com" in repr_str
         assert "pool=True" in repr_str

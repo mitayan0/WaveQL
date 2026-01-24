@@ -29,7 +29,15 @@ class MockAdapter(BaseAdapter):
                 elif pred.operator == "IN":
                     filtered = [r for r in filtered if r.get(pred.column) in pred.value]
         
-        return pa.Table.from_pylist(filtered) if filtered else pa.Table.from_pylist([])
+        if not filtered:
+            # Return empty table with schema to avoid errors in unique() calls
+            if self.data:
+                # Use first row to get schema
+                schema = pa.Table.from_pylist(self.data[:1]).schema
+                return pa.Table.from_batches([], schema=schema)
+            return pa.Table.from_pylist([])
+            
+        return pa.Table.from_pylist(filtered)
 
     def get_schema(self, table):
         # Infer schema from first row of mock data
@@ -79,6 +87,9 @@ def mock_connection():
     conn._duckdb = real_duckdb # Internal
     conn.duckdb = real_duckdb  # Property
     conn._virtual_views = {}   # Required by cursor execution logic
+    conn._policy_manager = None # Required by cursor execution logic
+    conn._cache = MagicMock()  # Required for adapter execution path
+    conn._cache.config.enabled = False 
     
     # Ensure view manager doesn't think every table is a local view
     if hasattr(conn, "view_manager"):
@@ -87,12 +98,13 @@ def mock_connection():
     return conn, users_adapter, incidents_adapter
 
 def test_semi_join_pushdown(mock_connection):
+    """
+    Test that the virtual join engine correctly identifies and pushes semi-join
+    filters across adapters.
+    """
     conn, users_adapter, incidents_adapter = mock_connection
     cursor = WaveQLCursor(conn)
     
-    # Query: Get incidents for active users
-    # This involves a join between servicenow.incident and users_db.users
-    # We filter users by active=True first.
     sql = """
     SELECT i.sys_id, i.short_description, u.name 
     FROM servicenow.incident i 
@@ -101,34 +113,24 @@ def test_semi_join_pushdown(mock_connection):
     """
     
     # Execute
-    info = cursor._planner.parse(sql)
-    print(f"DEBUG: Aliases: {info.aliases}")
-    print(f"DEBUG: Predicates: {info.predicates}")
-    print(f"DEBUG: Joins: {info.joins}")
-    try:
-        cursor.execute(sql)
-        results = cursor.fetchall()  # Might fail here or above
-    except Exception as e:
-        print(f"Caught expected Execution Error (likely DuckDB schema issue in test env): {e}")
-        # We continue to verify if the optimization (Pushdown) blocked the bad fetch
-        pass
+    # The pushdown happens DURING execute()
+    cursor.execute(sql)
     
     # VERIFY OPTIMIZATION
     # 1. Users adapter should have received filter active=True
     assert len(users_adapter.fetch_log) >= 1
     u_preds = users_adapter.fetch_log[0]["predicates"]
-    print(f"Users Predicates: {u_preds}")
     assert any(p.column == "active" and (p.value is True or p.value == "true") for p in u_preds)
     
     # 2. ServiceNow adapter should have received an IN filter on caller_id
     # It should NOT be a blind fetch
     assert len(incidents_adapter.fetch_log) >= 1
     inc_preds = incidents_adapter.fetch_log[0]["predicates"]
-    print(f"Incident Predicates: {inc_preds}")
     
     # Retrieve the caller_id predicate
     caller_pred = next((p for p in inc_preds if p.column == "caller_id"), None)
     assert caller_pred is not None, "Optimization Failed: No predicate pushed to incident table"
     assert caller_pred.operator == "IN"
-    # Ensure values were extracted
-    assert set(caller_pred.value) == {"user1", "user3"} # user2 is inactive
+    # Ensure values were extracted (user1 and user3 are active)
+    assert set(caller_pred.value) == {"user1", "user3"}
+

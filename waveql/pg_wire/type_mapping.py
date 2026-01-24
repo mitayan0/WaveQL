@@ -430,12 +430,22 @@ def decode_value(value: Optional[bytes], type_name: str) -> Any:
     text = value.decode('utf-8')
     
     if type_name == "bool":
-        return text == "t"
+        return text.lower() in ("t", "true", "1")
+        
     if type_name in ("int2", "int4", "int8", "oid"):
         return int(text)
-    if type_name in ("float4", "float8"):
+        
+    if type_name in ("float4", "float8", "numeric"):
         return float(text)
-    if type_name == "json" or type_name == "jsonb":
+        
+    if type_name == "date":
+        return date.fromisoformat(text)
+        
+    if type_name in ("timestamp", "timestamptz"):
+        # Basic ISO parsing - might need more robust parsing for PG specifics
+        return datetime.fromisoformat(text.replace(" ", "T"))
+
+    if type_name in ("json", "jsonb"):
         return json.loads(text)
         
     return text

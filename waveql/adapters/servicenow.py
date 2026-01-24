@@ -132,16 +132,16 @@ class ServiceNowAdapter(BaseAdapter):
         )
         
         # Fetch data (with pagination if needed)
-        if limit and limit <= self._page_size:
-            # Single request
-            records = self._fetch_page(url, params)
-        else:
-            # Paginated fetch
-            records = self._fetch_all_pages(url, params, limit)
+        # HTTPX client is now standard
+        records = self._fetch_all_pages(url, params, limit)
         
         # Discover/use cached schema
         schema_columns = self._get_or_discover_schema(table_name, records)
-        
+        if not schema_columns and not records:
+             # If no records and no schema found (and no fallback), we might have issues
+             # But let's try to get schema even if no records found
+             schema_columns = self._get_or_discover_schema(table_name, [])
+
         # Convert to Arrow
         table = self._to_arrow(records, schema_columns, columns)
         
@@ -152,7 +152,7 @@ class ServiceNowAdapter(BaseAdapter):
             })
             
         return table
-    
+
     async def fetch_async(
         self,
         table: str,
@@ -172,29 +172,27 @@ class ServiceNowAdapter(BaseAdapter):
         if bool(group_by or aggregates):
             return await self._fetch_stats_async(table, predicates, group_by, aggregates, order_by, limit)
 
-        # Note: Column selection handled in _build_query_params
-        
         url = f"{self._host}/api/now/table/{table_name}"
         params = self._build_query_params(columns, predicates, limit, offset, order_by)
         
         if limit and limit <= self._page_size:
             records = await self._fetch_page_async(url, params)
         else:
-            # Note: ParallelFetcher is not async-native yet, 
-            # so for now we just fetch sequentially or implement a simple async loop
             records = await self._fetch_all_pages_async(url, params, limit)
         
         schema_columns = await self._get_or_discover_schema_async(table_name, records)
+        if not schema_columns and not records:
+             schema_columns = await self._get_or_discover_schema_async(table_name, [])
+
         table = self._to_arrow(records, schema_columns, columns)
         
-        # Attach execution metadata for observability
         if "sysparm_query" in params:
             table = table.replace_schema_metadata({
                 b"waveql_source_query": params["sysparm_query"].encode("utf-8")
             })
             
         return table
-
+    
     def _extract_table_name(self, table: str) -> str:
         """Extract table name from schema.table format and strip quotes."""
         if not table:
@@ -212,7 +210,7 @@ class ServiceNowAdapter(BaseAdapter):
         if "." in col:
             col = col.rsplit(".", 1)[1]
         return col.strip('"')
-    
+
     def _build_query_params(
         self,
         columns: List[str],
@@ -262,7 +260,7 @@ class ServiceNowAdapter(BaseAdapter):
                                       f"ORDERBY{','.join(order_parts)}"
         
         return params
-    
+
     def _predicate_to_query(self, pred: "Predicate") -> str:
         """Convert predicate to ServiceNow query syntax."""
         col = self._clean_column_name(pred.column)
@@ -300,214 +298,6 @@ class ServiceNowAdapter(BaseAdapter):
         else:
             return f"{col}{sn_op}{val}"
     
-    async def _fetch_page_async(self, url: str, params: Dict) -> List[Dict]:
-        """Fetch a single page of results (async)."""
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            **await self._get_auth_headers_async(),
-        }
-        
-        client = self._get_async_client()
-        
-        async def do_request():
-            response = await client.get(url, params=params, headers=headers, timeout=self._timeout)
-            
-            if response.status_code == 429:
-                retry_after = int(response.headers.get("Retry-After", 60))
-                raise RateLimitError("Rate limit exceeded", retry_after=retry_after)
-            
-            response.raise_for_status()
-            return response.json()
-        
-        try:
-            data = await self._rate_limiter.execute_with_retry_async(do_request)
-            return data.get("result", [])
-        except httpx.HTTPError as e:
-            raise AdapterError(f"ServiceNow request failed (async): {e}")
-
-    def _fetch_page(self, url: str, params: Dict) -> List[Dict]:
-        """Fetch a single page of results with automatic retry on rate limits."""
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            **self._get_auth_headers(),
-        }
-        
-        with self._get_session() as session:
-            def do_request():
-                response = session.get(
-                    url, params=params, headers=headers, timeout=self._timeout
-                )
-                
-                if response.status_code == 429:
-                    retry_after = int(response.headers.get("Retry-After", 60))
-                    raise RateLimitError("Rate limit exceeded", retry_after=retry_after)
-                
-                response.raise_for_status()
-                return response.json()
-            
-            try:
-                # Use rate limiter for automatic retry
-                data = self._rate_limiter.execute_with_retry(do_request)
-                return data.get("result", [])
-                
-            except RateLimitError:
-                raise  # Re-raise after all retries exhausted
-            except requests.RequestException as e:
-                raise AdapterError(f"ServiceNow request failed: {e}")
-    
-    async def _fetch_all_pages_async(self, url: str, params: Dict, limit: int = None) -> List[Dict]:
-        """Fetch all pages asynchronously with parallel requests for better performance."""
-        import anyio
-        
-        page_size = int(params.get("sysparm_limit", self._page_size))
-        
-        # First, fetch the initial page to understand the data
-        first_page_params = {**params, "sysparm_offset": "0", "sysparm_limit": str(page_size)}
-        first_page = await self._fetch_page_async(url, first_page_params)
-        
-        if len(first_page) < page_size:
-            # Only one page needed
-            return first_page[:limit] if limit else first_page
-        
-        all_records = list(first_page)
-        
-        # Calculate how many more pages we might need
-        max_pages = min(self._max_parallel, 10)  # Cap at 10 concurrent requests
-        if limit:
-            remaining = limit - len(all_records)
-            estimated_pages = (remaining + page_size - 1) // page_size
-            max_pages = min(max_pages, estimated_pages)
-        
-        # Fetch remaining pages in parallel batches
-        offset = page_size
-        while True:
-            # Create batch of page requests
-            batch_offsets = []
-            for i in range(max_pages):
-                if limit and offset >= limit:
-                    break
-                batch_offsets.append(offset)
-                offset += page_size
-            
-            if not batch_offsets:
-                break
-            
-            # Fetch batch in parallel
-            async def fetch_offset(off: int) -> List[Dict]:
-                page_params = {**params, "sysparm_offset": str(off), "sysparm_limit": str(page_size)}
-                return await self._fetch_page_async(url, page_params)
-            
-            # Use anyio task group for parallel execution
-            results = []
-            async with anyio.create_task_group() as tg:
-                async def fetch_and_store(off: int, idx: int):
-                    result = await fetch_offset(off)
-                    results.append((idx, result))
-                
-                for idx, off in enumerate(batch_offsets):
-                    tg.start_soon(fetch_and_store, off, idx)
-            
-            # Sort by index to maintain order and extend
-            results.sort(key=lambda x: x[0])
-            
-            found_partial = False
-            for _, records in results:
-                all_records.extend(records)
-                if len(records) < page_size:
-                    found_partial = True
-                    break
-            
-            if found_partial:
-                break
-            
-            if limit and len(all_records) >= limit:
-                break
-        
-        return all_records[:limit] if limit else all_records
-
-    def _fetch_all_pages(self, url: str, params: Dict, limit: int = None) -> List[Dict]:
-        """Fetch all pages sequentially until a partial page is returned."""
-        all_records = []
-        page_size = int(params.get("sysparm_limit", self._page_size))
-        offset = 0
-        
-        while True:
-            page_params = {**params, "sysparm_offset": str(offset)}
-            records = self._fetch_page(url, page_params)
-            all_records.extend(records)
-            
-            # Stop if page is not full (indicates last page) or if we've hit the limit
-            if len(records) < page_size:
-                break
-                
-            offset += page_size
-            if limit and len(all_records) >= limit:
-                break
-        
-        return all_records[:limit] if limit else all_records
-    
-    async def _get_or_discover_schema_async(self, table: str, records: List[Dict]) -> List[ColumnInfo]:
-        """Get cached schema or discover from response (async)."""
-        cached = self._get_cached_schema(table)
-        if cached:
-            return cached
-        
-        if not records:
-            # If no records, we try to discover by fetching one record (async)
-            return await self.get_schema_async(table)
-        
-        # Use new schema inference utility for robust multi-sample detection
-        from waveql.utils.schema import infer_schema_from_records
-        
-        arrow_schema = infer_schema_from_records(records, sample_size=5)
-        
-        # Convert Arrow schema to ColumnInfo for caching
-        columns = []
-        for field in arrow_schema:
-            columns.append(ColumnInfo(
-                name=field.name,
-                data_type=self._arrow_type_to_string(field.type),
-                nullable=True,
-                arrow_type=field.type,
-            ))
-        
-        self._cache_schema(table, columns)
-        return columns
-
-
-    def _get_or_discover_schema(self, table: str, records: List[Dict]) -> List[ColumnInfo]:
-        """Get cached schema or discover from response."""
-        cached = self._get_cached_schema(table)
-        if cached:
-            return cached
-        
-        # Discover from records using multi-sample inference
-        if not records:
-            return []
-        
-        # Use new schema inference utility for robust multi-sample detection
-        from waveql.utils.schema import infer_schema_from_records
-        
-        arrow_schema = infer_schema_from_records(records, sample_size=5)
-        
-        # Convert Arrow schema to ColumnInfo for caching
-        columns = []
-        for field in arrow_schema:
-            # Store the Arrow type directly in data_type for struct support
-            columns.append(ColumnInfo(
-                name=field.name,
-                data_type=self._arrow_type_to_string(field.type),
-                nullable=True,
-                # Store the actual Arrow type for _to_arrow
-                arrow_type=field.type,
-            ))
-        
-        # Cache the schema
-        self._cache_schema(table, columns)
-        return columns
-    
     def _arrow_type_to_string(self, arrow_type: pa.DataType) -> str:
         """Convert Arrow type to string representation for legacy compatibility."""
         if pa.types.is_boolean(arrow_type):
@@ -521,7 +311,7 @@ class ServiceNowAdapter(BaseAdapter):
         if pa.types.is_list(arrow_type):
             return "list"
         return "string"
-    
+        
     def _to_arrow(
         self,
         records: List[Dict],
@@ -561,390 +351,101 @@ class ServiceNowAdapter(BaseAdapter):
         
         # Convert using the new utility with struct support
         return records_to_arrow_table(filtered_records, schema=schema)
-    
-    async def get_schema_async(self, table: str) -> List[ColumnInfo]:
-        """Discover schema by fetching one record (async)."""
-        table_name = self._extract_table_name(table)
-        cached = self._get_cached_schema(table_name)
-        if cached:
-            return cached
-        
-        url = f"{self._host}/api/now/table/{table_name}"
-        params = {"sysparm_limit": "1"}
-        records = await self._fetch_page_async(url, params)
-        
-        return await self._get_or_discover_schema_async(table_name, records)
 
-    def get_schema(self, table: str) -> List[ColumnInfo]:
-        """Discover schema by fetching one record."""
-        table_name = self._extract_table_name(table)
+    async def _fetch_all_pages_async(self, url: str, params: Dict, limit: int = None) -> List[Dict]:
+        """Fetch all pages asynchronously with parallel requests."""
+        import anyio
         
-        # Check cache first
-        cached = self._get_cached_schema(table_name)
-        if cached:
-            return cached
+        page_size = int(params.get("sysparm_limit", self._page_size))
         
-        # Fetch one record to discover schema
-        url = f"{self._host}/api/now/table/{table_name}"
-        params = {"sysparm_limit": "1"}
-        records = self._fetch_page(url, params)
+        # First, fetch the initial page
+        first_page_params = {**params, "sysparm_offset": "0", "sysparm_limit": str(page_size)}
+        first_page = await self._fetch_page_async(url, first_page_params)
         
-        return self._get_or_discover_schema(table_name, records)
-    
-    async def insert_async(
-        self,
-        table: str,
-        values: Dict[str, Any],
-        parameters: Sequence = None,
-    ) -> int:
-        """Insert a record into ServiceNow (async) with rate limiting."""
-        table_name = self._extract_table_name(table)
-        url = f"{self._host}/api/now/table/{table_name}"
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            **await self._get_auth_headers_async(),
-        }
+        if len(first_page) < page_size:
+            return first_page[:limit] if limit else first_page
         
-        client = self._get_async_client()
+        all_records = list(first_page)
         
-        async def do_insert():
-            response = await client.post(url, json=values, headers=headers, timeout=self._timeout)
-            if response.status_code == 429:
-                retry_after = int(response.headers.get("Retry-After", 60))
-                raise RateLimitError("Rate limit exceeded", retry_after=retry_after)
-            response.raise_for_status()
-            return response
+        # Calculate pages
+        max_pages = min(self._max_parallel, 10)
+        if limit:
+            remaining = limit - len(all_records)
+            estimated_pages = (remaining + page_size - 1) // page_size
+            max_pages = min(max_pages, estimated_pages)
         
-        try:
-            await self._rate_limiter.execute_with_retry_async(do_insert)
-            return 1
-        except RateLimitError:
-            raise
-        except httpx.HTTPError as e:
-            raise QueryError(f"INSERT failed (async): {e}")
-
-    def insert(
-        self,
-        table: str,
-        values: Dict[str, Any],
-        parameters: Sequence = None,
-    ) -> int:
-        """Insert a record into ServiceNow with rate limiting."""
-        table_name = self._extract_table_name(table)
-        url = f"{self._host}/api/now/table/{table_name}"
-        
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            **self._get_auth_headers(),
-        }
-        
-        with self._get_session() as session:
-            def do_insert():
-                response = session.post(
-                    url, json=values, headers=headers, timeout=self._timeout
-                )
-                if response.status_code == 429:
-                    retry_after = int(response.headers.get("Retry-After", 60))
-                    raise RateLimitError("Rate limit exceeded", retry_after=retry_after)
-                response.raise_for_status()
-                return response
+        # Fetch remaining pages in parallel batches
+        offset = page_size
+        while True:
+            batch_offsets = []
+            for i in range(max_pages):
+                if limit and offset >= limit:
+                    break
+                batch_offsets.append(offset)
+                offset += page_size
             
+            if not batch_offsets:
+                break
+            
+            async def fetch_offset(off: int) -> List[Dict]:
+                page_params = {**params, "sysparm_offset": str(off), "sysparm_limit": str(page_size)}
+                return await self._fetch_page_async(url, page_params)
+            
+            results = []
             try:
-                self._rate_limiter.execute_with_retry(do_insert)
-                return 1
-            except RateLimitError:
-                raise
-            except requests.RequestException as e:
-                raise QueryError(f"INSERT failed: {e}")
+                async with anyio.create_task_group() as tg:
+                    async def fetch_and_store(off: int, idx: int):
+                        result = await fetch_offset(off)
+                        results.append((idx, result))
+                    
+                    for idx, off in enumerate(batch_offsets):
+                        tg.start_soon(fetch_and_store, off, idx)
+            except Exception as e:
+                # Fallback to sequential if task group fails (e.g. nested loop issues)
+                logger.warning(f"Parallel fetch failed, falling back to sequential: {e}")
+                for idx, off in enumerate(batch_offsets):
+                    res = await fetch_offset(off)
+                    results.append((idx, res))
+            
+            results.sort(key=lambda x: x[0])
+            
+            found_partial = False
+            for _, records in results:
+                all_records.extend(records)
+                if len(records) < page_size:
+                    found_partial = True
+                    break
+            
+            if found_partial:
+                break
+            
+            if limit and len(all_records) >= limit:
+                break
+        
+        return all_records[:limit] if limit else all_records
     
-    async def update_async(
-        self,
-        table: str,
-        values: Dict[str, Any],
-        predicates: List["Predicate"] = None,
-        parameters: Sequence = None,
-    ) -> int:
-        """Update records in ServiceNow (async) with rate limiting and bulk support.
+    def _fetch_all_pages(self, url: str, params: Dict, limit: int = None) -> List[Dict]:
+        """Fetch all pages sequentially until a partial page is returned."""
+        all_records = []
+        page_size = int(params.get("sysparm_limit", self._page_size))
+        offset = 0
         
-        Supports:
-        - Single update: WHERE sys_id = 'value'
-        - Bulk update: WHERE sys_id IN ('v1', 'v2', ...)
-        """
-        table_name = self._extract_table_name(table)
-        
-        # Get sys_id(s) from predicates - support both = and IN operators
-        sys_ids = []
-        for pred in (predicates or []):
-            if pred.column.lower() == "sys_id":
-                if pred.operator == "=":
-                    sys_ids = [pred.value]
-                    break
-                elif pred.operator == "IN" and isinstance(pred.value, (list, tuple)):
-                    sys_ids = list(pred.value)
-                    break
-        
-        if not sys_ids:
-            raise QueryError("UPDATE requires sys_id in WHERE clause (use = or IN operator)")
-        
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            **await self._get_auth_headers_async(),
-        }
-        
-        client = self._get_async_client()
-        updated_count = 0
-        
-        for sys_id in sys_ids:
-            url = f"{self._host}/api/now/table/{table_name}/{sys_id}"
-            
-            # Capture url by value using default argument to avoid closure bug
-            async def do_update(url=url):
-                response = await client.patch(url, json=values, headers=headers, timeout=self._timeout)
-                if response.status_code == 429:
-                    retry_after = int(response.headers.get("Retry-After", 60))
-                    raise RateLimitError("Rate limit exceeded", retry_after=retry_after)
-                response.raise_for_status()
-                return response
-            
-            try:
-                await self._rate_limiter.execute_with_retry_async(do_update)
-                updated_count += 1
-            except RateLimitError:
-                raise
-            except httpx.HTTPError as e:
-                raise QueryError(f"UPDATE failed for sys_id={sys_id} (async): {e}")
-        
-        return updated_count
-
-    def update(
-        self,
-        table: str,
-        values: Dict[str, Any],
-        predicates: List["Predicate"] = None,
-        parameters: Sequence = None,
-    ) -> int:
-        """Update records in ServiceNow with rate limiting and bulk support.
-        
-        Supports:
-        - Single update: WHERE sys_id = 'value'
-        - Bulk update: WHERE sys_id IN ('v1', 'v2', ...)
-        """
-        table_name = self._extract_table_name(table)
-        
-        # Get sys_id(s) from predicates - support both = and IN operators
-        sys_ids = []
-        for pred in (predicates or []):
-            if pred.column.lower() == "sys_id":
-                if pred.operator == "=":
-                    sys_ids = [pred.value]
-                    break
-                elif pred.operator == "IN" and isinstance(pred.value, (list, tuple)):
-                    sys_ids = list(pred.value)
-                    break
-        
-        if not sys_ids:
-            raise QueryError("UPDATE requires sys_id in WHERE clause (use = or IN operator)")
-        
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            **self._get_auth_headers(),
-        }
-        
-        updated_count = 0
-        with self._get_session() as session:
-            for sys_id in sys_ids:
-                url = f"{self._host}/api/now/table/{table_name}/{sys_id}"
+        # Use a single client for session persistence
+        with httpx.Client(timeout=self._timeout) as client:
+            while True:
+                page_params = {**params, "sysparm_offset": str(offset)}
+                records = self._fetch_page(url, page_params, client)
+                all_records.extend(records)
                 
-                # Capture url by value using default argument to avoid closure bug
-                def do_update(url=url):
-                    response = session.patch(
-                        url, json=values, headers=headers, timeout=self._timeout
-                    )
-                    if response.status_code == 429:
-                        retry_after = int(response.headers.get("Retry-After", 60))
-                        raise RateLimitError("Rate limit exceeded", retry_after=retry_after)
-                    response.raise_for_status()
-                    return response
-                
-                try:
-                    self._rate_limiter.execute_with_retry(do_update)
-                    updated_count += 1
-                except RateLimitError:
-                    raise
-                except requests.RequestException as e:
-                    raise QueryError(f"UPDATE failed for sys_id={sys_id}: {e}")
-        
-        return updated_count
-    
-    async def delete_async(
-        self,
-        table: str,
-        predicates: List["Predicate"] = None,
-        parameters: Sequence = None,
-    ) -> int:
-        """Delete records from ServiceNow (async) with rate limiting and bulk support.
-        
-        Supports:
-        - Single delete: WHERE sys_id = 'value'
-        - Bulk delete: WHERE sys_id IN ('v1', 'v2', ...)
-        """
-        table_name = self._extract_table_name(table)
-        
-        # Get sys_id(s) from predicates - support both = and IN operators
-        sys_ids = []
-        for pred in (predicates or []):
-            if pred.column.lower() == "sys_id":
-                if pred.operator == "=":
-                    sys_ids = [pred.value]
+                # Stop if page is not full (indicates last page) or if we've hit the limit
+                if len(records) < page_size:
                     break
-                elif pred.operator == "IN" and isinstance(pred.value, (list, tuple)):
-                    sys_ids = list(pred.value)
+                    
+                offset += page_size
+                if limit and len(all_records) >= limit:
                     break
         
-        if not sys_ids:
-            raise QueryError("DELETE requires sys_id in WHERE clause (use = or IN operator)")
-        
-        headers = {
-            "Accept": "application/json",
-            **await self._get_auth_headers_async(),
-        }
-        
-        client = self._get_async_client()
-        deleted_count = 0
-        
-        for sys_id in sys_ids:
-            url = f"{self._host}/api/now/table/{table_name}/{sys_id}"
-            
-            # Capture url by value using default argument to avoid closure bug
-            async def do_delete(url=url):
-                response = await client.delete(url, headers=headers, timeout=self._timeout)
-                if response.status_code == 429:
-                    retry_after = int(response.headers.get("Retry-After", 60))
-                    raise RateLimitError("Rate limit exceeded", retry_after=retry_after)
-                response.raise_for_status()
-                return response
-            
-            try:
-                await self._rate_limiter.execute_with_retry_async(do_delete)
-                deleted_count += 1
-            except RateLimitError:
-                raise
-            except httpx.HTTPError as e:
-                raise QueryError(f"DELETE failed for sys_id={sys_id} (async): {e}")
-        
-        return deleted_count
-
-    def delete(
-        self,
-        table: str,
-        predicates: List["Predicate"] = None,
-        parameters: Sequence = None,
-    ) -> int:
-        """Delete records from ServiceNow with rate limiting and bulk support.
-        
-        Supports:
-        - Single delete: WHERE sys_id = 'value'
-        - Bulk delete: WHERE sys_id IN ('v1', 'v2', ...)
-        """
-        table_name = self._extract_table_name(table)
-        
-        # Get sys_id(s) from predicates - support both = and IN operators
-        sys_ids = []
-        for pred in (predicates or []):
-            if pred.column.lower() == "sys_id":
-                if pred.operator == "=":
-                    sys_ids = [pred.value]
-                    break
-                elif pred.operator == "IN" and isinstance(pred.value, (list, tuple)):
-                    sys_ids = list(pred.value)
-                    break
-        
-        if not sys_ids:
-            raise QueryError("DELETE requires sys_id in WHERE clause (use = or IN operator)")
-        
-        headers = {
-            "Accept": "application/json",
-            **self._get_auth_headers(),
-        }
-        
-        deleted_count = 0
-        with self._get_session() as session:
-            for sys_id in sys_ids:
-                url = f"{self._host}/api/now/table/{table_name}/{sys_id}"
-                
-                # Capture url by value using default argument to avoid closure bug
-                def do_delete(url=url):
-                    response = session.delete(url, headers=headers, timeout=self._timeout)
-                    if response.status_code == 429:
-                        retry_after = int(response.headers.get("Retry-After", 60))
-                        raise RateLimitError("Rate limit exceeded", retry_after=retry_after)
-                    response.raise_for_status()
-                    return response
-                
-                try:
-                    self._rate_limiter.execute_with_retry(do_delete)
-                    deleted_count += 1
-                except RateLimitError:
-                    raise
-                except requests.RequestException as e:
-                    raise QueryError(f"DELETE failed for sys_id={sys_id}: {e}")
-        
-        return deleted_count
-    
-    async def list_tables_async(self) -> List[str]:
-        """List available ServiceNow tables (async)."""
-        try:
-            records = await self.fetch_async(
-                "sys_db_object",
-                columns=["name", "label"],
-                limit=1000,
-            )
-            return [row["name"] for row in records.to_pylist()]
-        except Exception:
-            return []
-
-    def list_tables(self) -> List[str]:
-        """List available ServiceNow tables (from sys_db_object)."""
-        try:
-            records = self.fetch(
-                "sys_db_object",
-                columns=["name", "label"],
-                limit=1000,
-            )
-            return [row["name"] for row in records.to_pylist()]
-        except Exception:
-            return []
-    
-    async def _fetch_stats_async(self, table, predicates, group_by, aggregates, order_by, limit) -> pa.Table:
-        """Fetch aggregation statistics (async)."""
-        url = f"{self._host}/api/now/stats/{self._extract_table_name(table)}"
-        params = self._build_stats_params(predicates, group_by, aggregates, order_by)
-        
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            **await self._get_auth_headers_async(),
-        }
-        
-        client = self._get_async_client()
-        response = await client.get(url, params=params, headers=headers, timeout=self._timeout)
-        response.raise_for_status()
-        data = response.json()
-            
-        result = data.get("result", [])
-        table = self._process_stats_result(result, limit, aggregates)
-        
-        # Attach execution metadata
-        if "sysparm_query" in params:
-            table = table.replace_schema_metadata({
-                b"waveql_source_query": params["sysparm_query"].encode("utf-8")
-            })
-            
-        return table
+        return all_records[:limit] if limit else all_records
 
     def _build_stats_params(self, predicates, group_by, aggregates, order_by) -> Dict:
         """Helper to build stats params (moved out of _fetch_stats)."""
@@ -1010,27 +511,530 @@ class ServiceNowAdapter(BaseAdapter):
             return pa.Table.from_pylist([])
         return pa.Table.from_pylist(rows)
 
-    def _fetch_stats(self, table, predicates, group_by, aggregates, order_by, limit) -> pa.Table:
-        """Fetch aggregation statistics (sync)."""
-        url = f"{self._host}/api/now/stats/{self._extract_table_name(table)}"
-        params = self._build_stats_params(predicates, group_by, aggregates, order_by)
+    
+    def _fetch_page(self, url: str, params: Dict, client: httpx.Client) -> List[Dict]:
+        """Fetch a single page of results with automatic retry on rate limits."""
         headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",
             **self._get_auth_headers(),
         }
-        with self._get_session() as session:
-            response = session.get(url, params=params, headers=headers)
-            response.raise_for_status()
-            table = self._process_stats_result(response.json().get("result", []), limit, aggregates)
+        
+        def do_request():
+            response = client.get(
+                url, params=params, headers=headers, timeout=self._timeout
+            )
             
-            # Attach execution metadata
-            if "sysparm_query" in params:
-                table = table.replace_schema_metadata({
-                    b"waveql_source_query": params["sysparm_query"].encode("utf-8")
-                })
+            if response.status_code == 429:
+                retry_after = int(response.headers.get("Retry-After", 60))
+                raise RateLimitError("Rate limit exceeded", retry_after=retry_after)
+            
+            response.raise_for_status()
+            return response.json()
+        
+        try:
+            # Use rate limiter for automatic retry
+            data = self._rate_limiter.execute_with_retry(do_request)
+            return data.get("result", [])
+            
+        except RateLimitError:
+            raise  # Re-raise after all retries exhausted
+        except httpx.HTTPError as e:
+            raise AdapterError(f"ServiceNow request failed: {e}")
+
+            
+    async def _fetch_page_async(self, url: str, params: Dict) -> List[Dict]:
+        """Fetch a single page of results (async)."""
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            **await self._get_auth_headers_async(),
+        }
+        
+        client = self._get_async_client()
+        
+        async def do_request():
+            response = await client.get(url, params=params, headers=headers, timeout=self._timeout)
+            
+            if response.status_code == 429:
+                retry_after = int(response.headers.get("Retry-After", 60))
+                raise RateLimitError("Rate limit exceeded", retry_after=retry_after)
+            
+            response.raise_for_status()
+            return response.json()
+        
+        try:
+            data = await self._rate_limiter.execute_with_retry_async(do_request)
+            return data.get("result", [])
+        except httpx.HTTPError as e:
+            raise AdapterError(f"ServiceNow request failed (async): {e}")
+
+
+        self._cache_schema(table, columns)
+        return columns
+
+    async def _get_or_discover_schema_async(self, table: str, records: List[Dict]) -> List[ColumnInfo]:
+        """Get cached schema or discover from response (async)."""
+        cached = self._get_cached_schema(table)
+        if cached:
+            return cached
+            
+        # Try metadata first
+        columns = await self._fetch_schema_from_metadata_async(table)
+        if columns:
+            self._cache_schema(table, columns)
+            return columns
+        
+        if not records:
+            # Avoid infinite recursion if get_schema_async calls this
+            # return await self.get_schema_async(table)
+            return []
+        
+        from waveql.utils.schema import infer_schema_from_records
+        arrow_schema = infer_schema_from_records(records, sample_size=5)
+        
+        columns = []
+        for field in arrow_schema:
+            columns.append(ColumnInfo(
+                name=field.name,
+                data_type=self._arrow_type_to_string(field.type),
+                nullable=True,
+                primary_key=field.name == "sys_id",
+                arrow_type=field.type,
+            ))
+        
+        self._cache_schema(table, columns)
+        return columns
+
+        return columns
+
+    def _get_or_discover_schema(self, table: str, records: List[Dict]) -> List[ColumnInfo]:
+        """Get cached schema or discover from response."""
+        cached = self._get_cached_schema(table)
+        if cached:
+            return cached
+            
+        # Try metadata first
+        columns = self._fetch_schema_from_metadata(table)
+        if columns:
+            self._cache_schema(table, columns)
+            return columns
+        
+        # Discover from records using multi-sample inference
+        if not records:
+            return []
+        
+        # Use new schema inference utility for robust multi-sample detection
+        from waveql.utils.schema import infer_schema_from_records
+        
+        arrow_schema = infer_schema_from_records(records, sample_size=5)
+        
+        # Convert Arrow schema to ColumnInfo for caching
+        columns = []
+        for field in arrow_schema:
+            # Store the Arrow type directly in data_type for struct support
+            columns.append(ColumnInfo(
+                name=field.name,
+                data_type=self._arrow_type_to_string(field.type),
+                nullable=True,
+                primary_key=field.name == "sys_id", # Best guess for inference
+                # Store the actual Arrow type for _to_arrow
+                arrow_type=field.type,
+            ))
+        
+        # Cache the schema
+        self._cache_schema(table, columns)
+        return columns
+
+    
+    async def get_schema_async(self, table: str) -> List[ColumnInfo]:
+        """Discover schema by fetching metadata or one record (async)."""
+        table_name = self._extract_table_name(table)
+        cached = self._get_cached_schema(table_name)
+        if cached:
+            return cached
+        
+        # Try metadata first
+        columns = await self._fetch_schema_from_metadata_async(table_name)
+        if columns:
+            self._cache_schema(table_name, columns)
+            return columns
+
+        url = f"{self._host}/api/now/table/{table_name}"
+        params = {"sysparm_limit": "1"}
+        records = await self._fetch_page_async(url, params)
+        
+        return await self._get_or_discover_schema_async(table_name, records)
+
+    def _get_table_hierarchy(self, table_name: str) -> List[str]:
+        """Resolve table hierarchy (e.g. sc_req_item -> task)."""
+        hierarchy = [table_name]
+        current_table = table_name
+        
+        # Limit depth to avoid infinite loops
+        for _ in range(5):
+            try:
+                url = f"{self._host}/api/now/table/sys_db_object"
+                params = {
+                    "sysparm_query": f"name={current_table}",
+                    "sysparm_fields": "super_class.name",
+                    "sysparm_limit": "1"
+                }
                 
-            return table
+                with httpx.Client(timeout=self._timeout) as client:
+                    data = self._fetch_page(url, params, client)
+                    
+                if not data:
+                    break
+                    
+                parent = data[0].get("super_class.name")
+                if not parent:
+                    break
+                    
+                hierarchy.append(parent)
+                current_table = parent
+            except Exception:
+                break
+                
+        return hierarchy
+
+    def _fetch_schema_from_metadata(self, table_name: str) -> Optional[List[ColumnInfo]]:
+        """Fetch schema from sys_dictionary utilizing table hierarchy."""
+        try:
+            # 1. Resolve hierarchy to include inherited fields
+            tables = self._get_table_hierarchy(table_name)
+            tables_str = ",".join(tables)
+            
+            # 2. Query sys_dictionary for all tables in hierarchy
+            url = f"{self._host}/api/now/table/sys_dictionary"
+            params = {
+                "sysparm_query": f"nameIN{tables_str}",
+                "sysparm_fields": "element,internal_type,mandatory,primary,attributes,default_value,read_only",
+                "sysparm_limit": "2000" # Increase limit for combined fields
+            }
+            
+            with httpx.Client(timeout=self._timeout) as client:
+                data = self._fetch_page(url, params, client)
+            
+            if not data:
+                return None
+            
+            # 3. Process columns, deduplicating by name (child overrides parent usually, but here just unique)
+            columns_map = {}
+            for row in data:
+                name = row.get("element")
+                if not name: continue 
+                
+                # If we already have this column (e.g. from child), skip or merge?
+                # Usually we want the definition from the most specific table, but sys_dictionary 
+                # often defines it once. We'll simply take the first one seen or overwrite.
+                # Given logic order is usually arbitrary unless sorted, we'll store all and dedupe.
+                if name in columns_map:
+                    continue
+
+                internal_type = row.get("internal_type", "string")
+                is_mandatory = row.get("mandatory") == "true"
+                is_primary = row.get("primary") == "true" or name == "sys_id"
+                is_read_only = row.get("read_only") == "true"
+                
+                default_val = row.get("default_value", "")
+                is_auto_inc = "javascript:getNextObjNumber" in str(default_val) or "Next Obj Number" in str(default_val)
+                
+                arrow_type = self.TYPE_MAP.get(internal_type, pa.string())
+                
+                columns_map[name] = ColumnInfo(
+                    name=name,
+                    data_type=internal_type,
+                    nullable=not is_mandatory,
+                    primary_key=is_primary,
+                    auto_increment=is_auto_inc,
+                    read_only=is_read_only,
+                    arrow_type=arrow_type
+                )
+            
+            # Ensure sys_id is present if not found (phantom parent issue)
+            if "sys_id" not in columns_map:
+                 columns_map["sys_id"] = ColumnInfo(
+                    name="sys_id",
+                    data_type="guid",
+                    nullable=False,
+                    primary_key=True,
+                    read_only=True,
+                    arrow_type=pa.string()
+                )
+
+            return list(columns_map.values())
+
+        except Exception as e:
+            logger.warning("Failed to fetch metadata from sys_dictionary for %s: %s", table_name, e)
+            return None
+            
+        except Exception as e:
+            logger.warning("Failed to fetch metadata from sys_dictionary for %s: %s", table_name, e)
+            return None
+
+    async def _get_table_hierarchy_async(self, table_name: str) -> List[str]:
+        """Resolve table hierarchy async."""
+        hierarchy = [table_name]
+        current_table = table_name
+        
+        client = self._get_async_client()
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            **await self._get_auth_headers_async(),
+        }
+
+        for _ in range(5):
+            try:
+                url = f"{self._host}/api/now/table/sys_db_object"
+                params = {
+                    "sysparm_query": f"name={current_table}",
+                    "sysparm_fields": "super_class.name",
+                    "sysparm_limit": "1"
+                }
+                response = await client.get(url, params=params, headers=headers, timeout=self._timeout)
+                if response.status_code != 200:
+                    break
+                    
+                data = response.json().get("result", [])
+                if not data:
+                    break
+                    
+                parent = data[0].get("super_class.name")
+                if not parent:
+                    break
+                    
+                hierarchy.append(parent)
+                current_table = parent
+            except Exception:
+                break
+        return hierarchy
+
+    async def _fetch_schema_from_metadata_async(self, table_name: str) -> Optional[List[ColumnInfo]]:
+        """Fetch schema from sys_dictionary utilizing table hierarchy (async)."""
+        try:
+            # 1. Resolve hierarchy
+            tables = await self._get_table_hierarchy_async(table_name)
+            tables_str = ",".join(tables)
+            
+            # 2. Query sys_dictionary
+            url = f"{self._host}/api/now/table/sys_dictionary"
+            params = {
+                "sysparm_query": f"nameIN{tables_str}",
+                "sysparm_fields": "element,internal_type,mandatory,primary,attributes,default_value,read_only",
+                "sysparm_limit": "2000"
+            }
+            
+            client = self._get_async_client()
+            headers = {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                **await self._get_auth_headers_async(),
+            }
+            
+            response = await client.get(url, params=params, headers=headers, timeout=self._timeout)
+            if response.status_code != 200:
+                logger.warning("Schema API failed (async) %s: %s", response.status_code, response.text)
+                return None
+            
+            data = response.json().get("result", [])
+            if not data:
+                return None
+            
+            # 3. Process columns
+            columns_map = {}
+            for row in data:
+                name = row.get("element")
+                if not name: continue 
+                
+                if name in columns_map:
+                    continue
+
+                internal_type = row.get("internal_type", "string")
+                is_mandatory = row.get("mandatory") == "true"
+                is_primary = row.get("primary") == "true" or name == "sys_id"
+                is_read_only = row.get("read_only") == "true"
+                
+                default_val = row.get("default_value", "")
+                is_auto_inc = "javascript:getNextObjNumber" in str(default_val) or "Next Obj Number" in str(default_val)
+                
+                arrow_type = self.TYPE_MAP.get(internal_type, pa.string())
+                
+                columns_map[name] = ColumnInfo(
+                    name=name,
+                    data_type=internal_type,
+                    nullable=not is_mandatory,
+                    primary_key=is_primary,
+                    auto_increment=is_auto_inc,
+                    read_only=is_read_only,
+                    arrow_type=arrow_type
+                )
+            
+            if "sys_id" not in columns_map:
+                 columns_map["sys_id"] = ColumnInfo(
+                    name="sys_id",
+                    data_type="guid",
+                    nullable=False,
+                    primary_key=True,
+                    read_only=True,
+                    arrow_type=pa.string()
+                )
+            
+            return list(columns_map.values())
+        except Exception as e:
+            logger.warning("Failed to fetch metadata from sys_dictionary (async) for %s: %s", table_name, e)
+            return None
+
+    async def insert_async(
+        self,
+        table: str,
+        values: Dict[str, Any],
+        parameters: Sequence = None,
+    ) -> int:
+        """Insert a record into ServiceNow (async)."""
+        table_name = self._extract_table_name(table)
+        url = f"{self._host}/api/now/table/{table_name}"
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            **await self._get_auth_headers_async(),
+        }
+        
+        client = self._get_async_client()
+        async def do_insert():
+            response = await client.post(url, json=values, headers=headers, timeout=self._timeout)
+            if response.status_code == 429:
+                retry_after = int(response.headers.get("Retry-After", 60))
+                raise RateLimitError("Rate limit exceeded", retry_after=retry_after)
+            response.raise_for_status()
+            return response
+        
+        try:
+            await self._rate_limiter.execute_with_retry_async(do_insert)
+            return 1
+        except RateLimitError:
+            raise
+        except httpx.HTTPError as e:
+            raise QueryError(f"INSERT failed (async): {e}")
+
+    async def update_async(
+        self,
+        table: str,
+        values: Dict[str, Any],
+        predicates: List["Predicate"] = None,
+        parameters: Sequence = None,
+    ) -> int:
+        """Update records in ServiceNow (async)."""
+        table_name = self._extract_table_name(table)
+        sys_ids = []
+        for pred in (predicates or []):
+            if pred.column.lower() == "sys_id":
+                if pred.operator == "=":
+                    sys_ids = [pred.value]
+                    break
+                elif pred.operator == "IN" and isinstance(pred.value, (list, tuple)):
+                    sys_ids = list(pred.value)
+                    break
+        
+        if not sys_ids:
+            raise QueryError("UPDATE requires sys_id in WHERE clause")
+        
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            **await self._get_auth_headers_async(),
+        }
+        
+        client = self._get_async_client()
+        updated_count = 0
+        
+        for sys_id in sys_ids:
+            url = f"{self._host}/api/now/table/{table_name}/{sys_id}"
+            async def do_update(url=url):
+                response = await client.patch(url, json=values, headers=headers, timeout=self._timeout)
+                if response.status_code == 429:
+                    retry_after = int(response.headers.get("Retry-After", 60))
+                    raise RateLimitError("Rate limit exceeded", retry_after=retry_after)
+                response.raise_for_status()
+                return response
+            
+            try:
+                await self._rate_limiter.execute_with_retry_async(do_update)
+                updated_count += 1
+            except RateLimitError:
+                raise
+            except httpx.HTTPError as e:
+                raise QueryError(f"UPDATE failed for sys_id={sys_id} (async): {e}")
+        return updated_count
+
+    async def delete_async(
+        self,
+        table: str,
+        predicates: List["Predicate"] = None,
+        parameters: Sequence = None,
+    ) -> int:
+        """Delete records from ServiceNow (async)."""
+        table_name = self._extract_table_name(table)
+        sys_ids = []
+        for pred in (predicates or []):
+            if pred.column.lower() == "sys_id":
+                if pred.operator == "=":
+                    sys_ids = [pred.value]
+                    break
+                elif pred.operator == "IN" and isinstance(pred.value, (list, tuple)):
+                    sys_ids = list(pred.value)
+                    break
+        
+        if not sys_ids:
+            raise QueryError("DELETE requires sys_id in WHERE clause")
+        
+        headers = {
+            "Accept": "application/json",
+            **await self._get_auth_headers_async(),
+        }
+        
+        client = self._get_async_client()
+        deleted_count = 0
+        for sys_id in sys_ids:
+            url = f"{self._host}/api/now/table/{table_name}/{sys_id}"
+            async def do_delete(url=url):
+                response = await client.delete(url, headers=headers, timeout=self._timeout)
+                if response.status_code == 429:
+                    retry_after = int(response.headers.get("Retry-After", 60))
+                    raise RateLimitError("Rate limit exceeded", retry_after=retry_after)
+                response.raise_for_status()
+                return response
+            
+            try:
+                await self._rate_limiter.execute_with_retry_async(do_delete)
+                deleted_count += 1
+            except RateLimitError:
+                raise
+            except httpx.HTTPError as e:
+                raise QueryError(f"DELETE failed for sys_id={sys_id} (async): {e}")
+        return deleted_count
+    
+    async def _fetch_stats_async(self, table, predicates, group_by, aggregates, order_by, limit) -> pa.Table:
+        """Fetch aggregation statistics (async)."""
+        url = f"{self._host}/api/now/stats/{self._extract_table_name(table)}"
+        params = self._build_stats_params(predicates, group_by, aggregates, order_by)
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            **await self._get_auth_headers_async(),
+        }
+        client = self._get_async_client()
+        response = await client.get(url, params=params, headers=headers, timeout=self._timeout)
+        response.raise_for_status()
+        data = response.json()
+        result = data.get("result", [])
+        table = self._process_stats_result(result, limit, aggregates)
+        if "sysparm_query" in params:
+            table = table.replace_schema_metadata({
+                b"waveql_source_query": params["sysparm_query"].encode("utf-8")
+            })
+        return table
 
     async def _fetch_attachment_content_async(self, predicates: List["Predicate"]) -> pa.Table:
         """Fetch binary content from the Attachment API (async)."""
@@ -1050,6 +1054,211 @@ class ServiceNowAdapter(BaseAdapter):
         content = response.content
         return pa.Table.from_pylist([{"sys_id": sys_id, "content": content}])
 
+    async def list_tables_async(self) -> List[str]:
+        """List available ServiceNow tables (async)."""
+        try:
+            records = await self.fetch_async(
+                "sys_db_object",
+                columns=["name", "label"],
+                limit=1000,
+            )
+            return [row["name"] for row in records.to_pylist()]
+        except Exception:
+            return []
+
+    def get_schema(self, table: str) -> List[ColumnInfo]:
+        """Discover schema by fetching one record."""
+        table_name = self._extract_table_name(table)
+        
+        # Check cache first
+        cached = self._get_cached_schema(table_name)
+        if cached:
+            return cached
+        
+        # Fetch one record to discover schema
+        url = f"{self._host}/api/now/table/{table_name}"
+        params = {"sysparm_limit": "1"}
+        
+        with httpx.Client(timeout=self._timeout) as client:
+            records = self._fetch_page(url, params, client)
+        
+        return self._get_or_discover_schema(table_name, records)
+
+    def insert(
+        self,
+        table: str,
+        values: Dict[str, Any],
+        parameters: Sequence = None,
+    ) -> int:
+        """Insert a record into ServiceNow with rate limiting."""
+        table_name = self._extract_table_name(table)
+        url = f"{self._host}/api/now/table/{table_name}"
+        
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            **self._get_auth_headers(),
+        }
+        
+        with httpx.Client(timeout=self._timeout) as client:
+            def do_insert():
+                response = client.post(
+                    url, json=values, headers=headers, timeout=self._timeout
+                )
+                if response.status_code == 429:
+                    retry_after = int(response.headers.get("Retry-After", 60))
+                    raise RateLimitError("Rate limit exceeded", retry_after=retry_after)
+                response.raise_for_status()
+                return response
+            
+            try:
+                self._rate_limiter.execute_with_retry(do_insert)
+                return 1
+            except RateLimitError:
+                raise
+            except httpx.HTTPError as e:
+                raise QueryError(f"INSERT failed: {e}")
+
+    def update(
+        self,
+        table: str,
+        values: Dict[str, Any],
+        predicates: List["Predicate"] = None,
+        parameters: Sequence = None,
+    ) -> int:
+        """Update records in ServiceNow with rate limiting and bulk support."""
+        table_name = self._extract_table_name(table)
+        
+        # Get sys_id(s) from predicates
+        sys_ids = []
+        for pred in (predicates or []):
+            if pred.column.lower() == "sys_id":
+                if pred.operator == "=":
+                    sys_ids = [pred.value]
+                    break
+                elif pred.operator == "IN" and isinstance(pred.value, (list, tuple)):
+                    sys_ids = list(pred.value)
+                    break
+        
+        if not sys_ids:
+            raise QueryError("UPDATE requires sys_id in WHERE clause (use = or IN operator)")
+        
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            **self._get_auth_headers(),
+        }
+        
+        updated_count = 0
+        with httpx.Client(timeout=self._timeout) as client:
+            for sys_id in sys_ids:
+                url = f"{self._host}/api/now/table/{table_name}/{sys_id}"
+                
+                def do_update(url=url):
+                    response = client.patch(
+                        url, json=values, headers=headers
+                    )
+                    if response.status_code == 429:
+                        retry_after = int(response.headers.get("Retry-After", 60))
+                        raise RateLimitError("Rate limit exceeded", retry_after=retry_after)
+                    response.raise_for_status()
+                    return response
+                
+                try:
+                    self._rate_limiter.execute_with_retry(do_update)
+                    updated_count += 1
+                except RateLimitError:
+                    raise
+                except httpx.HTTPError as e:
+                    raise QueryError(f"UPDATE failed for sys_id={sys_id}: {e}")
+        
+        return updated_count
+
+    def delete(
+        self,
+        table: str,
+        predicates: List["Predicate"] = None,
+        parameters: Sequence = None,
+    ) -> int:
+        """Delete records from ServiceNow with rate limiting and bulk support."""
+        table_name = self._extract_table_name(table)
+        
+        # Get sys_id(s) from predicates
+        sys_ids = []
+        for pred in (predicates or []):
+            if pred.column.lower() == "sys_id":
+                if pred.operator == "=":
+                    sys_ids = [pred.value]
+                    break
+                elif pred.operator == "IN" and isinstance(pred.value, (list, tuple)):
+                    sys_ids = list(pred.value)
+                    break
+        
+        if not sys_ids:
+            raise QueryError("DELETE requires sys_id in WHERE clause (use = or IN operator)")
+        
+        headers = {
+            "Accept": "application/json",
+            **self._get_auth_headers(),
+        }
+        
+        deleted_count = 0
+        with httpx.Client(timeout=self._timeout) as client:
+            for sys_id in sys_ids:
+                url = f"{self._host}/api/now/table/{table_name}/{sys_id}"
+                
+                def do_delete(url=url):
+                    response = client.delete(url, headers=headers)
+                    if response.status_code == 429:
+                        retry_after = int(response.headers.get("Retry-After", 60))
+                        raise RateLimitError("Rate limit exceeded", retry_after=retry_after)
+                    response.raise_for_status()
+                    return response
+                
+                try:
+                    self._rate_limiter.execute_with_retry(do_delete)
+                    deleted_count += 1
+                except RateLimitError:
+                    raise
+                except httpx.HTTPError as e:
+                    raise QueryError(f"DELETE failed for sys_id={sys_id}: {e}")
+        
+        return deleted_count
+
+    def list_tables(self) -> List[str]:
+        """List available ServiceNow tables (from sys_db_object)."""
+        try:
+            records = self.fetch(
+                "sys_db_object",
+                columns=["name", "label"],
+                limit=1000,
+            )
+            return [row["name"] for row in records.to_pylist()]
+        except Exception:
+            return []
+
+    def _fetch_stats(self, table, predicates, group_by, aggregates, order_by, limit) -> pa.Table:
+        """Fetch aggregation statistics (sync)."""
+        url = f"{self._host}/api/now/stats/{self._extract_table_name(table)}"
+        params = self._build_stats_params(predicates, group_by, aggregates, order_by)
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            **self._get_auth_headers(),
+        }
+        with httpx.Client(timeout=self._timeout) as client:
+            response = client.get(url, params=params, headers=headers)
+            response.raise_for_status()
+            table = self._process_stats_result(response.json().get("result", []), limit, aggregates)
+            
+            # Attach execution metadata
+            if "sysparm_query" in params:
+                table = table.replace_schema_metadata({
+                    b"waveql_source_query": params["sysparm_query"].encode("utf-8")
+                })
+                
+            return table
+
     def _fetch_attachment_content(self, predicates: List["Predicate"]) -> pa.Table:
         """Fetch binary content from the Attachment API."""
         # Get sys_id from predicates
@@ -1065,8 +1274,8 @@ class ServiceNowAdapter(BaseAdapter):
         url = f"{self._host}/api/now/attachment/{sys_id}/file"
         headers = {**self._get_auth_headers()}
         
-        with self._get_session() as session:
-            response = session.get(url, headers=headers, timeout=self._timeout)
+        with httpx.Client(timeout=self._timeout) as client:
+            response = client.get(url, headers=headers)
             response.raise_for_status()
             
             # Return as an Arrow table with a binary column

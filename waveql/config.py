@@ -181,18 +181,18 @@ class WaveQLConfig:
         self.views_dir.mkdir(parents=True, exist_ok=True)
     
     def to_dict(self) -> Dict[str, str]:
-        """Convert to dictionary with string paths."""
+        """Convert to dictionary with string paths (POSIX format for cross-platform compatibility)."""
         return {
-            "data_dir": str(self.data_dir),
-            "transaction_db": str(self.transaction_db),
-            "registry_db": str(self.registry_db),
-            "views_dir": str(self.views_dir),
-            "cdc_state_db": str(self.cdc_state_db),
-            "credentials_file": str(self.credentials_file),
+            "data_dir": self.data_dir.as_posix(),
+            "transaction_db": self.transaction_db.as_posix(),
+            "registry_db": self.registry_db.as_posix(),
+            "views_dir": self.views_dir.as_posix(),
+            "cdc_state_db": self.cdc_state_db.as_posix(),
+            "credentials_file": self.credentials_file.as_posix(),
         }
     
     def __repr__(self) -> str:
-        return f"WaveQLConfig(data_dir={self.data_dir})"
+        return f"WaveQLConfig(data_dir={self.data_dir.as_posix()})"
 
 
 # Global configuration singleton

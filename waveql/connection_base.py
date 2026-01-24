@@ -5,7 +5,7 @@ WaveQL Connection Base - Common functionality for sync and async connections
 from __future__ import annotations
 import logging
 from typing import Any, Dict, TYPE_CHECKING
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, unquote
 
 if TYPE_CHECKING:
     from waveql.auth.manager import AuthManager
@@ -87,8 +87,8 @@ class ConnectionMixin:
         result = {
             "adapter": scheme or parsed.scheme,       # Use manually extracted scheme
             "host": host,                             # hostname excludes credentials
-            "username": parsed.username,              # Extracted from user:pass@host
-            "password": parsed.password,              # Extracted from user:pass@host
+            "username": unquote(parsed.username) if parsed.username else None,  # URL-decode
+            "password": unquote(parsed.password) if parsed.password else None,  # URL-decode
             "port": parsed.port,                      # Extracted from host:port
             "params": params
         }

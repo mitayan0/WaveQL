@@ -23,6 +23,8 @@ class ColumnInfo:
     nullable: bool = True
     primary_key: bool = False
     description: str = ""
+    auto_increment: bool = False
+    read_only: bool = False
     arrow_type: Any = None  # Optional PyArrow DataType for struct/list support
 
 
@@ -43,7 +45,8 @@ class TableSchema:
         return {
             "name": self.name,
             "columns": [{"name": c.name, "data_type": c.data_type, "nullable": c.nullable,
-                         "primary_key": c.primary_key, "description": c.description}
+                         "primary_key": c.primary_key, "description": c.description,
+                         "auto_increment": c.auto_increment, "read_only": c.read_only}
                         for c in self.columns],
             "adapter": self.adapter,
             "discovered_at": self.discovered_at,
@@ -228,6 +231,7 @@ class SchemaCache:
                 "Type": c.data_type,
                 "Null": "YES" if c.nullable else "NO",
                 "Key": "PRI" if c.primary_key else "",
+                "Extra": f"{'auto_increment' if c.auto_increment else ''} {'readonly' if c.read_only else ''}".strip(),
                 "Description": c.description,
             }
             for c in schema.columns

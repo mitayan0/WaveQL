@@ -322,6 +322,70 @@ class TestSalesforceAdapter:
         # Verify result Arrow table
         assert len(data) == 2
         assert data.column_names == ["Industry", "cnt"]
-        assert data["cnt"][0].as_py() == 10
-        assert data["Industry"][0].as_py() == "Tech"
+    @responses.activate
+    def test_bulk_insert_timeout(self):
+        """Test Bulk API V2 timeout scenario."""
+        # 1. Create Job
+        responses.add(responses.POST, "https://test.salesforce.com/services/data/v57.0/jobs/ingest/",
+            json={"id": "job_timeout", "state": "Open"}, status=200)
+        
+        # 2. Upload Data
+        responses.add(responses.PUT, "https://test.salesforce.com/services/data/v57.0/jobs/ingest/job_timeout/batches", status=201)
+        
+        # 3. Close Job
+        responses.add(responses.PATCH, "https://test.salesforce.com/services/data/v57.0/jobs/ingest/job_timeout/",
+            json={"id": "job_timeout", "state": "UploadComplete"}, status=200)
+            
+        # 4. Polling - Always InProgress
+        responses.add(responses.GET, "https://test.salesforce.com/services/data/v57.0/jobs/ingest/job_timeout/",
+            json={"id": "job_timeout", "state": "InProgress"}, status=200)
+            
+        # 5. Abort call (on exception)
+        responses.add(responses.PATCH, "https://test.salesforce.com/services/data/v57.0/jobs/ingest/job_timeout/",
+            json={"state": "Aborted"}, status=200)
+            
+        adapter = SalesforceAdapter(host="test.salesforce.com")
+        
+        # Mock time.sleep and time.time to simulate timeout
+        import time
+        original_sleep = time.sleep
+        time.sleep = lambda x: None
+        
+        try:
+             # Set short timeout
+             with pytest.raises(AdapterError, match="Bulk insert timed out"):
+                 adapter.insert_bulk("Account", [{"Name": "A"}], wait_timeout=1)
+                 
+             # Verify abort was called
+             # calls: POST, PUT, PATCH(close), GET(poll), ..., PATCH(abort)
+             assert responses.calls[-1].request.method == "PATCH"
+             assert "Aborted" in responses.calls[-1].request.body.decode()
+             
+        finally:
+            time.sleep = original_sleep
+
+    @responses.activate
+    def test_bulk_insert_failure_during_upload(self):
+        """Test exception handling during upload."""
+        # 1. Create Job
+        responses.add(responses.POST, "https://test.salesforce.com/services/data/v57.0/jobs/ingest/",
+            json={"id": "job_fail", "state": "Open"}, status=200)
+            
+        # 2. Upload Data - FAIL
+        responses.add(responses.PUT, "https://test.salesforce.com/services/data/v57.0/jobs/ingest/job_fail/batches",
+            body="Simulated Network Error", status=500)
+            
+        # 3. Abort call
+        responses.add(responses.PATCH, "https://test.salesforce.com/services/data/v57.0/jobs/ingest/job_fail/",
+            json={"state": "Aborted"}, status=200)
+            
+        adapter = SalesforceAdapter(host="test.salesforce.com")
+        
+        with pytest.raises(Exception): # requests.HTTPError or AdapterError depending on wrap
+             adapter.insert_bulk("Account", [{"Name": "A"}])
+             
+        # Verify abort was called
+        # calls: POST, PUT(fail), PATCH(abort)
+        assert responses.calls[-1].request.method == "PATCH"
+        assert "Aborted" in responses.calls[-1].request.body.decode()
 

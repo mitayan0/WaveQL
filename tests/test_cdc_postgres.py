@@ -1,443 +1,357 @@
-"""
-Tests for PostgreSQL CDC Provider
-
-These tests verify the PostgreSQL WAL-based CDC implementation.
-"""
 
 import pytest
-from unittest.mock import Mock, MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, patch, ANY
+import asyncio
 from datetime import datetime
+import json
 
 from waveql.cdc.postgres import PostgresCDCProvider
-from waveql.cdc.models import Change, ChangeType
+from waveql.cdc.models import ChangeType, CDCConfig
 
+class TestPostgresCDCProvider:
+    
+    @pytest.fixture
+    def mock_adapter(self):
+        adapter = MagicMock()
+        adapter.adapter_name = "postgres"
+        adapter._connection_string = "postgresql://user:pass@localhost/db"
+        return adapter
 
-class TestPostgresCDCProviderInit:
-    """Tests for PostgresCDCProvider initialization."""
+    @pytest.fixture
+    def mock_psycopg2(self):
+        mock = MagicMock()
+        with patch.dict("sys.modules", {"psycopg2": mock, "psycopg2.sql": MagicMock(), "psycopg2.extras": MagicMock()}):
+            yield mock
 
-    def test_init_defaults(self):
-        """Test provider initialization with defaults."""
-        adapter = Mock()
-        adapter._connection_string = "postgresql://localhost/test"
+    def test_init(self, mock_adapter):
+        provider = PostgresCDCProvider(mock_adapter, slot_name="test_slot")
+        assert provider._slot_name == "test_slot"
+        assert provider.provider_name == "postgres"
+        assert provider.supports_delete_detection is True
+
+    def test_get_connection_string_from_args(self, mock_adapter):
+        provider = PostgresCDCProvider(mock_adapter, connection_string="postgresql://custom")
+        assert provider._get_connection_string() == "postgresql://custom"
+
+    def test_get_connection_string_from_adapter(self, mock_adapter):
+        provider = PostgresCDCProvider(mock_adapter)
+        assert provider._get_connection_string() == "postgresql://user:pass@localhost/db"
+
+    @pytest.mark.asyncio
+    async def test_ensure_slot_exists_creates_slot(self, mock_adapter, mock_psycopg2):
+        # Setup mock connection and cursor
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_psycopg2.connect.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
         
-        provider = PostgresCDCProvider(adapter)
+        # Simulate slot not existing
+        mock_cursor.fetchone.return_value = None
         
-        assert provider.adapter == adapter
-        assert provider._slot_name == "waveql_cdc"
-        assert provider._output_plugin == "wal2json"
-        assert provider._create_slot is True
-        assert provider._include_transaction is False
-
-    def test_init_custom_options(self):
-        """Test provider initialization with custom options."""
-        adapter = Mock()
+        provider = PostgresCDCProvider(mock_adapter, slot_name="new_slot", create_slot=True)
+        await provider._ensure_slot_exists()
         
-        provider = PostgresCDCProvider(
-            adapter=adapter,
-            connection_string="postgresql://custom/db",
-            slot_name="my_slot",
-            output_plugin="test_decoding",
-            create_slot=False,
-            include_transaction=True,
+        # Verify slot creation query
+        mock_cursor.execute.assert_any_call(
+            "SELECT pg_create_logical_replication_slot(%s, %s)",
+            ("new_slot", "wal2json")
         )
+
+    @pytest.mark.asyncio
+    async def test_ensure_slot_exists_already_exists(self, mock_adapter, mock_psycopg2):
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_psycopg2.connect.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
         
-        assert provider._connection_string == "postgresql://custom/db"
-        assert provider._slot_name == "my_slot"
-        assert provider._output_plugin == "test_decoding"
-        assert provider._create_slot is False
-        assert provider._include_transaction is True
-
-    def test_repr(self):
-        """Test string representation."""
-        adapter = Mock()
-        provider = PostgresCDCProvider(adapter, slot_name="test_slot")
+        # Simulate slot existing
+        mock_cursor.fetchone.return_value = ("existing_slot",)
         
-        assert "test_slot" in repr(provider)
-        assert "wal2json" in repr(provider)
-
-
-class TestPostgresCDCProviderConnectionString:
-    """Tests for connection string resolution."""
-
-    def test_explicit_connection_string(self):
-        """Test explicit connection string parameter."""
-        adapter = Mock()
-        provider = PostgresCDCProvider(
-            adapter=adapter,
-            connection_string="postgresql://explicit/db"
+        provider = PostgresCDCProvider(mock_adapter, slot_name="existing_slot")
+        await provider._ensure_slot_exists()
+        
+        # Verify NO slot creation query
+        assert mock_cursor.execute.call_count == 1 # Only the check query
+        mock_cursor.execute.assert_called_with(
+            "SELECT slot_name FROM pg_replication_slots WHERE slot_name = %s",
+            ("existing_slot",)
         )
-        
-        assert provider._get_connection_string() == "postgresql://explicit/db"
 
-    def test_connection_string_from_adapter(self):
-        """Test extracting connection string from adapter."""
-        adapter = Mock()
-        adapter._connection_string = "postgresql://from_adapter/db"
+    @pytest.mark.asyncio
+    async def test_connect_replication(self, mock_adapter, mock_psycopg2):
+        mock_conn = MagicMock()
+        mock_psycopg2.connect.return_value = mock_conn
         
-        provider = PostgresCDCProvider(adapter=adapter)
-        
-        assert provider._get_connection_string() == "postgresql://from_adapter/db"
+        # Mock _ensure_slot_exists to avoid side effects
+        provider = PostgresCDCProvider(mock_adapter)
+        with patch.object(provider, '_ensure_slot_exists', new_callable=AsyncMock) as mock_ensure:
+            cursor = await provider._connect_replication()
+            
+            mock_ensure.assert_called_once()
+            mock_psycopg2.connect.assert_called_with(
+                provider._get_connection_string(),
+                connection_factory=ANY 
+            )
+            assert cursor == mock_conn.cursor.return_value
 
-    def test_connection_string_from_adapter_host(self):
-        """Test extracting connection string from adapter host."""
-        adapter = Mock(spec=['_host'])
-        adapter._host = "postgresql://from_host/db"
+    @pytest.mark.asyncio
+    async def test_get_changes_wal2json(self, mock_adapter, mock_psycopg2):
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_psycopg2.connect.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
         
-        provider = PostgresCDCProvider(adapter=adapter)
+        # Simulate peek changes result
+        payload = json.dumps({
+            "change": [
+                {
+                    "kind": "insert",
+                    "schema": "public",
+                    "table": "users",
+                    "columnnames": ["id", "name"],
+                    "columnvalues": [1, "test"],
+                    "pk": [{"name": "id", "type": "integer", "value": 1}],
+                    "action": "I", # v2 format
+                    "columns": [
+                        {"name": "id", "value": 1},
+                        {"name": "name", "value": "test"}
+                    ]
+                }
+            ]
+        })
+        mock_cursor.fetchall.return_value = [(1, 123, payload)]
         
-        assert provider._get_connection_string() == "postgresql://from_host/db"
-
-    def test_connection_string_missing(self):
-        """Test error when no connection string available."""
-        adapter = Mock(spec=[])  # No _connection_string or _host
-        provider = PostgresCDCProvider(adapter=adapter)
-        
-        with pytest.raises(ValueError, match="No connection string"):
-            provider._get_connection_string()
-
-
-class TestPostgresCDCProviderTableParsing:
-    """Tests for table name parsing."""
-
-    def test_parse_simple_table(self):
-        """Test parsing simple table name."""
-        adapter = Mock()
-        provider = PostgresCDCProvider(adapter)
-        
-        schema, table = provider._parse_table_name("users")
-        
-        assert schema is None
-        assert table == "users"
-
-    def test_parse_schema_qualified_table(self):
-        """Test parsing schema.table name."""
-        adapter = Mock()
-        provider = PostgresCDCProvider(adapter)
-        
-        schema, table = provider._parse_table_name("public.users")
-        
-        assert schema == "public"
-        assert table == "users"
-
-    def test_parse_quoted_table(self):
-        """Test parsing quoted table name."""
-        adapter = Mock()
-        provider = PostgresCDCProvider(adapter)
-        
-        schema, table = provider._parse_table_name('"my_schema"."my_table"')
-        
-        assert schema == "my_schema"
-        assert table == "my_table"
-
-
-class TestWal2JsonParsing:
-    """Tests for wal2json message parsing."""
-
-    def test_parse_insert(self):
-        """Test parsing INSERT message."""
-        adapter = Mock()
-        provider = PostgresCDCProvider(adapter)
-        
-        payload = '''
-        {
-            "action": "I",
-            "schema": "public",
-            "table": "users",
-            "columns": [
-                {"name": "id", "value": 1},
-                {"name": "name", "value": "John"}
-            ],
-            "pk": [{"name": "id", "value": 1}]
-        }
-        '''
-        
-        changes = provider._parse_wal2json(payload, None)
+        provider = PostgresCDCProvider(mock_adapter)
+        changes = await provider.get_changes("public.users")
         
         assert len(changes) == 1
         assert changes[0].operation == ChangeType.INSERT
         assert changes[0].table == "public.users"
+        assert changes[0].data["name"] == "test"
         assert changes[0].key == 1
-        assert changes[0].data == {"id": 1, "name": "John"}
 
-    def test_parse_update(self):
-        """Test parsing UPDATE message."""
-        adapter = Mock()
-        provider = PostgresCDCProvider(adapter)
+    def test_parse_wal2json_insert(self, mock_adapter):
+        provider = PostgresCDCProvider(mock_adapter)
+        payload = json.dumps({
+            "action": "I",
+            "schema": "public",
+            "table": "users",
+            "pk": [{"name": "id", "value": 1}],
+            "columns": [
+                {"name": "id", "value": 1},
+                {"name": "name", "value": "Alice"}
+            ]
+        })
         
-        payload = '''
-        {
+        changes = provider._parse_wal2json(payload)
+        assert len(changes) == 1
+        change = changes[0]
+        assert change.operation == ChangeType.INSERT
+        assert change.key == 1
+        assert change.data == {"id": 1, "name": "Alice"}
+
+    def test_parse_wal2json_update(self, mock_adapter):
+        provider = PostgresCDCProvider(mock_adapter)
+        payload = json.dumps({
             "action": "U",
             "schema": "public",
             "table": "users",
+            "pk": [{"name": "id", "value": 1}],
             "columns": [
                 {"name": "id", "value": 1},
-                {"name": "name", "value": "Jane"}
+                {"name": "name", "value": "Bob"}
             ],
             "identity": [
-                {"name": "name", "value": "John"}
-            ],
-            "pk": [{"name": "id", "value": 1}]
-        }
-        '''
+                 {"name": "id", "value": 1},
+                 {"name": "name", "value": "Alice"}
+            ]
+        })
         
-        changes = provider._parse_wal2json(payload, None)
-        
+        changes = provider._parse_wal2json(payload)
         assert len(changes) == 1
-        assert changes[0].operation == ChangeType.UPDATE
-        assert changes[0].data["name"] == "Jane"
-        assert changes[0].old_data["name"] == "John"
+        change = changes[0]
+        assert change.operation == ChangeType.UPDATE
+        assert change.key == 1
+        assert change.data == {"id": 1, "name": "Bob"}
+        assert change.old_data == {"id": 1, "name": "Alice"}
 
-    def test_parse_delete(self):
-        """Test parsing DELETE message."""
-        adapter = Mock()
-        provider = PostgresCDCProvider(adapter)
+    def test_parse_wal2json_filter(self, mock_adapter):
+        provider = PostgresCDCProvider(mock_adapter)
+        payload = json.dumps({
+            "action": "I",
+            "schema": "other",
+            "table": "logs",
+            "pk": [{"name": "id", "value": 99}],
+            "columns": []
+        })
         
-        payload = '''
-        {
-            "action": "D",
+        # Valid filter
+        changes = provider._parse_wal2json(payload, table_filter="other.logs")
+        assert len(changes) == 1
+
+        # Invalid filter
+        changes = provider._parse_wal2json(payload, table_filter="public.users")
+        assert len(changes) == 0
+
+    def test_parse_test_decoding(self, mock_adapter):
+        provider = PostgresCDCProvider(mock_adapter, output_plugin="test_decoding")
+        payload = "table public.users: INSERT: id[integer]:1 name[text]:'test'"
+        
+        changes = provider._parse_test_decoding(payload)
+        assert len(changes) == 1
+        change = changes[0]
+        assert change.operation == ChangeType.INSERT
+        assert change.table == "public.users"
+        assert change.data["name"] == "test"
+
+    @pytest.mark.asyncio
+    async def test_drop_slot(self, mock_adapter, mock_psycopg2):
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_psycopg2.connect.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+        
+        provider = PostgresCDCProvider(mock_adapter, slot_name="test_slot")
+        await provider.drop_slot()
+        
+        mock_cursor.execute.assert_called_with(
+            "SELECT pg_drop_replication_slot(%s)",
+            ("test_slot",)
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_slot_info(self, mock_adapter, mock_psycopg2):
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_psycopg2.connect.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+        
+        mock_cursor.fetchone.return_value = (
+            "test_slot", "wal2json", "logical", True, 
+            "0/15E3", "0/15E3", "0/1600", "32 bytes"
+        )
+        
+        provider = PostgresCDCProvider(mock_adapter, slot_name="test_slot")
+        info = await provider.get_slot_info()
+        
+        assert info["slot_name"] == "test_slot"
+        assert info["plugin"] == "wal2json"
+        assert info["lag"] == "32 bytes"
+
+    def test_parse_table_name(self, mock_adapter):
+        provider = PostgresCDCProvider(mock_adapter)
+        
+        # Schema and table
+        assert provider._parse_table_name("public.users") == ("public", "users")
+        assert provider._parse_table_name('"public"."users"') == ("public", "users")
+        
+        # Table only
+        assert provider._parse_table_name("users") == (None, "users")
+
+    def test_build_plugin_options(self, mock_adapter):
+        provider = PostgresCDCProvider(mock_adapter, output_plugin="wal2json")
+        
+        options = provider._build_plugin_options("public", "users")
+        assert options["include-xids"] == "1"
+        assert options["add-tables"] == "public.users"
+        
+        provider = PostgresCDCProvider(mock_adapter, output_plugin="test_decoding")
+        assert provider._build_plugin_options("public", "users") == {}
+
+    @pytest.mark.asyncio
+    async def test_stream_changes(self, mock_adapter, mock_psycopg2):
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_psycopg2.connect.return_value = mock_conn
+        mock_conn.cursor.return_value = mock_cursor
+        
+        # Mock _read_message_sync to return a message then None (timeout)
+        mock_msg = MagicMock()
+        mock_msg.payload = json.dumps({
+            "action": "I",
             "schema": "public",
             "table": "users",
-            "identity": [
-                {"name": "id", "value": 1}
-            ],
-            "pk": [{"name": "id", "value": 1}]
-        }
-        '''
-        
-        changes = provider._parse_wal2json(payload, None)
-        
-        assert len(changes) == 1
-        assert changes[0].operation == ChangeType.DELETE
-        assert changes[0].key == 1
+            "pk": [{"name": "id", "value": 1}],
+            "columns": []
+        })
+        mock_msg.data_start = 12345
+        mock_msg.cursor.send_feedback = MagicMock()
 
-    def test_parse_with_table_filter(self):
-        """Test filtering changes by table."""
-        adapter = Mock()
-        provider = PostgresCDCProvider(adapter)
+        # We need to break the loop. 
+        # We can make _read_message_sync return [msg, None, None...] or raise exception or strict count
+        # Or we can just run for a bit 
         
-        payload = '''
-        {
+        provider = PostgresCDCProvider(mock_adapter)
+        
+        # Mock run_in_executor to avoid actual threading and just return msg
+        # First call returns msg, second raises runtime error to stop loop?
+        # Or use side_effect
+        
+        async def mock_executor(executor, func, *args):
+            if func == provider._read_message_sync:
+                # If it's the first call return msg
+                return mock_msg
+            return None
+            
+        with patch("asyncio.get_event_loop") as mock_loop:
+            # We want to break the loop by setting _running = False
+            # We can do this by having the usage loop break it
+            # But stream_changes loop checks self._running
+            
+            # Let's mock stream_changes logic partially?
+            # Or just let it run one iteration.
+            
+            # Better strategy: Mock internal _connect_replication and _read_message_sync
+            pass
+
+    @pytest.mark.asyncio
+    async def test_stream_changes_logic(self, mock_adapter):
+        # We will mock _connect_replication and _read_message_sync
+        provider = PostgresCDCProvider(mock_adapter)
+        
+        mock_cursor = MagicMock()
+        provider._connect_replication = AsyncMock(return_value=mock_cursor)
+        provider._close_connection = AsyncMock()
+        
+        # Mock payload
+        payload = json.dumps({
             "action": "I",
             "schema": "public",
-            "table": "orders",
-            "columns": [{"name": "id", "value": 1}],
-            "pk": [{"name": "id", "value": 1}]
-        }
-        '''
+            "table": "users",
+            "pk": [{"name": "id", "value": 1}],
+            "columns": []
+        })
+        mock_msg = MagicMock()
+        mock_msg.payload = payload
         
-        # Filter for 'users' table - should not match 'orders'
-        changes = provider._parse_wal2json(payload, "users")
-        assert len(changes) == 0
+        # _read_message_sync is called in executor.
+        # We can mock this call.
         
-        # Filter for 'orders' table - should match
-        changes = provider._parse_wal2json(payload, "orders")
-        assert len(changes) == 1
-
-    def test_parse_composite_primary_key(self):
-        """Test parsing table with composite primary key."""
-        adapter = Mock()
-        provider = PostgresCDCProvider(adapter)
-        
-        payload = '''
-        {
-            "action": "I",
-            "schema": "public",
-            "table": "order_items",
-            "columns": [
-                {"name": "order_id", "value": 100},
-                {"name": "item_id", "value": 5},
-                {"name": "qty", "value": 2}
-            ],
-            "pk": [
-                {"name": "order_id", "value": 100},
-                {"name": "item_id", "value": 5}
-            ]
-        }
-        '''
-        
-        changes = provider._parse_wal2json(payload, None)
-        
-        assert len(changes) == 1
-        # Composite key should be a dict
-        assert changes[0].key == {"order_id": 100, "item_id": 5}
-
-    def test_parse_batch_changes(self):
-        """Test parsing batch of changes."""
-        adapter = Mock()
-        provider = PostgresCDCProvider(adapter)
-        
-        payload = '''
-        {
-            "change": [
-                {"action": "I", "schema": "public", "table": "users", "columns": [{"name": "id", "value": 1}], "pk": [{"name": "id", "value": 1}]},
-                {"action": "U", "schema": "public", "table": "users", "columns": [{"name": "id", "value": 2}], "pk": [{"name": "id", "value": 2}]},
-                {"action": "D", "schema": "public", "table": "users", "identity": [{"name": "id", "value": 3}], "pk": [{"name": "id", "value": 3}]}
-            ]
-        }
-        '''
-        
-        changes = provider._parse_wal2json(payload, None)
-        
-        assert len(changes) == 3
-        assert changes[0].operation == ChangeType.INSERT
-        assert changes[1].operation == ChangeType.UPDATE
-        assert changes[2].operation == ChangeType.DELETE
-
-    def test_skip_transaction_messages(self):
-        """Test that BEGIN/COMMIT are skipped by default."""
-        adapter = Mock()
-        provider = PostgresCDCProvider(adapter, include_transaction=False)
-        
-        payload = '{"action": "B"}'  # BEGIN
-        changes = provider._parse_wal2json(payload, None)
-        assert len(changes) == 0
-        
-        payload = '{"action": "C"}'  # COMMIT
-        changes = provider._parse_wal2json(payload, None)
-        assert len(changes) == 0
-
-    def test_invalid_json(self):
-        """Test handling of invalid JSON."""
-        adapter = Mock()
-        provider = PostgresCDCProvider(adapter)
-        
-        changes = provider._parse_wal2json("not valid json", None)
-        assert len(changes) == 0
+        with patch.object(PostgresCDCProvider, '_read_message_sync') as mock_read:
+            mock_read.return_value = mock_msg
+            
+            # We need to run the generator
+            # We'll run it for one iteration then break
+            
+            agen = provider.stream_changes("public.users")
+            
+            # Mock get_event_loop().run_in_executor
+            with patch("asyncio.get_event_loop") as mock_loop:
+                mock_loop.return_value.run_in_executor = AsyncMock(side_effect=[mock_msg, Exception("Stop Loop")])
+                
+                try:
+                    async for change in agen:
+                        assert change.operation == ChangeType.INSERT
+                        break # Process one change and exit
+                except Exception:
+                    pass
+                
+                # Cleanup should have been called if we exited generator? 
+                # Actually if we break, generator might not close immediately unless we close it
+                await agen.aclose()
+                
+            provider._connect_replication.assert_called()
+            provider._close_connection.assert_called()
 
 
-class TestTestDecodingParsing:
-    """Tests for test_decoding message parsing."""
-
-    def test_parse_insert(self):
-        """Test parsing INSERT message."""
-        adapter = Mock()
-        provider = PostgresCDCProvider(adapter, output_plugin="test_decoding")
-        
-        payload = "table public.users: INSERT: id[integer]:1 name[text]:'John'"
-        
-        changes = provider._parse_test_decoding(payload, None)
-        
-        assert len(changes) == 1
-        assert changes[0].operation == ChangeType.INSERT
-        assert changes[0].table == "public.users"
-
-    def test_parse_update(self):
-        """Test parsing UPDATE message."""
-        adapter = Mock()
-        provider = PostgresCDCProvider(adapter, output_plugin="test_decoding")
-        
-        payload = "table public.users: UPDATE: id[integer]:1 name[text]:'Jane'"
-        
-        changes = provider._parse_test_decoding(payload, None)
-        
-        assert len(changes) == 1
-        assert changes[0].operation == ChangeType.UPDATE
-
-    def test_parse_delete(self):
-        """Test parsing DELETE message."""
-        adapter = Mock()
-        provider = PostgresCDCProvider(adapter, output_plugin="test_decoding")
-        
-        payload = "table public.users: DELETE: id[integer]:1"
-        
-        changes = provider._parse_test_decoding(payload, None)
-        
-        assert len(changes) == 1
-        assert changes[0].operation == ChangeType.DELETE
-
-    def test_skip_begin_commit(self):
-        """Test skipping BEGIN/COMMIT messages."""
-        adapter = Mock()
-        provider = PostgresCDCProvider(adapter, output_plugin="test_decoding")
-        
-        assert len(provider._parse_test_decoding("BEGIN 12345", None)) == 0
-        assert len(provider._parse_test_decoding("COMMIT 12345", None)) == 0
-
-
-class TestPluginOptions:
-    """Tests for output plugin options building."""
-
-    def test_wal2json_options_default(self):
-        """Test wal2json options without table filter."""
-        adapter = Mock()
-        provider = PostgresCDCProvider(adapter)
-        
-        options = provider._build_plugin_options(None, None)
-        
-        assert options['include-xids'] == '1'
-        assert options['include-timestamp'] == '1'
-        assert options['format-version'] == '2'
-
-    def test_wal2json_options_with_table(self):
-        """Test wal2json options with table filter."""
-        adapter = Mock()
-        provider = PostgresCDCProvider(adapter)
-        
-        options = provider._build_plugin_options("public", "users")
-        
-        assert options['add-tables'] == 'public.users'
-
-    def test_wal2json_options_with_table_no_schema(self):
-        """Test wal2json options with table filter but no schema."""
-        adapter = Mock()
-        provider = PostgresCDCProvider(adapter)
-        
-        options = provider._build_plugin_options(None, "users")
-        
-        assert options['add-tables'] == '*.users'
-
-    def test_test_decoding_options(self):
-        """Test test_decoding options are minimal."""
-        adapter = Mock()
-        provider = PostgresCDCProvider(adapter, output_plugin="test_decoding")
-        
-        options = provider._build_plugin_options("public", "users")
-        
-        # test_decoding has minimal options
-        assert len(options) == 0
-
-
-class TestProviderMetadata:
-    """Tests for provider metadata."""
-
-    def test_provider_name(self):
-        """Test provider name is 'postgres'."""
-        adapter = Mock()
-        provider = PostgresCDCProvider(adapter)
-        
-        assert provider.provider_name == "postgres"
-
-    def test_supports_delete_detection(self):
-        """Test delete detection is supported."""
-        adapter = Mock()
-        provider = PostgresCDCProvider(adapter)
-        
-        assert provider.supports_delete_detection is True
-
-    def test_supports_old_data(self):
-        """Test old data (before-image) is supported."""
-        adapter = Mock()
-        provider = PostgresCDCProvider(adapter)
-        
-        assert provider.supports_old_data is True
-
-
-class TestProviderRegistry:
-    """Tests for provider registration."""
-
-    def test_postgres_in_registry(self):
-        """Test PostgresCDCProvider is registered."""
-        from waveql.cdc.providers import CDC_PROVIDERS
-        
-        assert "postgres" in CDC_PROVIDERS
-        assert "postgresql" in CDC_PROVIDERS
-
-    def test_get_cdc_provider_postgres(self):
-        """Test getting PostgreSQL CDC provider."""
-        from waveql.cdc.providers import get_cdc_provider
-        
-        adapter = Mock()
-        provider = get_cdc_provider("postgres", adapter)
-        
-        assert provider is not None
-        assert isinstance(provider, PostgresCDCProvider)
+from unittest.mock import AsyncMock

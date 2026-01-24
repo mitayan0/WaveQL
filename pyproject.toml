@@ -78,3 +78,7 @@ waveql = "waveql.sqlalchemy.dialect:WaveQLDialect"
 "waveql.rest" = "waveql.sqlalchemy.dialect:WaveQLDialect"
 "waveql.file" = "waveql.sqlalchemy.dialect:WaveQLDialect"
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+

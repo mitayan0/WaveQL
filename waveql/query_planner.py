@@ -436,6 +436,14 @@ class QueryPlanner:
                 col = expression.this.left.sql()
                 predicates.append(Predicate(column=col, operator="IS NOT NULL", value=None))
         
+        # Handle BETWEEN (convert to >= and <=)
+        elif isinstance(expression, exp.Between):
+            col = expression.this.sql()
+            low = self._extract_literal(expression.args.get("low"))
+            high = self._extract_literal(expression.args.get("high"))
+            predicates.append(Predicate(column=col, operator=">=", value=low))
+            predicates.append(Predicate(column=col, operator="<=", value=high))
+        
         # Handle parentheses
         elif isinstance(expression, exp.Paren):
             predicates.extend(self._parse_condition(expression.this))

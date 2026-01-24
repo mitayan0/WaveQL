@@ -12,6 +12,7 @@ import pyarrow as pa
 
 from waveql.exceptions import QueryError
 from waveql.query_planner import QueryPlanner
+from waveql.optimizer import QueryOptimizer, CompoundPredicate, PredicateType
 from waveql.observability import QueryPlan
 from waveql.resource_optimizer import (
     get_budget_planner,
@@ -19,6 +20,8 @@ from waveql.resource_optimizer import (
     get_adaptive_pagination,
     get_resource_executor,
 )
+from waveql.provenance.tracker import get_provenance_tracker
+from waveql.provenance.traced_adapter import traced_fetch
 
 if TYPE_CHECKING:
     from waveql.connection import WaveQLConnection
@@ -95,6 +98,9 @@ class WaveQLCursor:
         # Query planner for predicate extraction
         self._planner = QueryPlanner()
         
+        # Query optimizer for predicate classification (pushable vs residual)
+        self._optimizer = QueryOptimizer()
+        
         # Budget planner for WITH BUDGET queries
         self._budget_planner = get_budget_planner()
         
@@ -168,6 +174,10 @@ class WaveQLCursor:
         # Parse query to extract table, predicates, etc.
         query_info = self._planner.parse(cleaned_operation)
         
+        # Apply Row-Level Security policies (inject predicates)
+        if self._connection._policy_manager:
+            query_info = self._apply_rls_policies(query_info, cleaned_operation)
+        
         # Initialize execution plan
         self.last_plan = QueryPlan(sql=operation, is_explain=query_info.is_explain)
         
@@ -181,21 +191,28 @@ class WaveQLCursor:
         # Determine which adapter to use
         adapter = self._resolve_adapter(query_info)
         
-        try:
-            if query_info.is_hybrid:
-                # Handle hybrid query (Historical + Live)
-                self._result = self._execute_hybrid(query_info, operation, parameters)
-            elif query_info.joins:
-                # Handle virtual join across adapters
-                self._result = self._execute_virtual_join(query_info, operation, parameters)
-            elif adapter:
-                # Route to adapter with predicate pushdown
-                self._result = self._execute_via_adapter(query_info, adapter, parameters)
-            else:
-                # Fall back to direct DuckDB execution
-                self._result = self._execute_direct(operation, parameters)
-        finally:
-            self.last_plan.finish()
+        # Wrap execution with provenance tracking
+        tracker = get_provenance_tracker()
+        with tracker.trace_query(operation) as _prov:
+            try:
+                if query_info.is_hybrid:
+                    # Handle hybrid query (Historical + Live)
+                    self._result = self._execute_hybrid(query_info, operation, parameters)
+                elif query_info.joins:
+                    # Handle virtual join across adapters
+                    self._result = self._execute_virtual_join(query_info, operation, parameters)
+                elif adapter:
+                    # Route to adapter with predicate pushdown
+                    self._result = self._execute_via_adapter(query_info, adapter, parameters)
+                else:
+                    # Fall back to direct DuckDB execution
+                    self._result = self._execute_direct(operation, parameters)
+            finally:
+                self.last_plan.finish()
+                
+                # Update provenance with row count
+                if _prov and self._result is not None:
+                    _prov.total_rows = len(self._result)
         
         if query_info.is_explain:
             # For EXPLAIN, return the plan as a single-column table
@@ -272,6 +289,220 @@ class WaveQLCursor:
         parts = [p.strip('"') for p in name.split(".")]
         return ".".join(parts)
     
+    def _apply_rls_policies(self, query_info, sql: str):
+        """
+        Apply Row-Level Security policies to the query.
+        
+        This method injects policy predicates into the query_info's predicate list,
+        enabling predicate pushdown to adapters while maintaining security.
+        
+        Args:
+            query_info: Parsed query information
+            sql: Original SQL string (for SQL-level rewriting if needed)
+            
+        Returns:
+            Modified query_info with policy predicates injected
+        """
+        from waveql.query_planner import Predicate
+        
+        if not query_info.table:
+            return query_info
+        
+        # Normalize table name for policy lookup
+        table = self._normalize_table_name(query_info.table)
+        operation = query_info.operation
+        
+        # Get applicable policies
+        policies = self._connection._policy_manager.get_applicable_policies(table, operation)
+        if not policies:
+            return query_info
+        
+        # Log policy application for audit
+        policy_names = [p.name for p in policies]
+        logger.debug("RLS: Applying policies %s to %s.%s", policy_names, table, operation)
+        
+        # Parse policy predicates and inject into query_info
+        # Note: We inject at the predicate level for pushdown compatibility
+        for policy in policies:
+            predicate_sql = policy.get_predicate()
+            
+            # Parse the policy predicate to extract structured Predicate objects
+            policy_predicates = self._parse_policy_predicate(predicate_sql)
+            
+            # Append policy predicates to existing predicates
+            # All predicates are ANDed together during execution
+            query_info.predicates.extend(policy_predicates)
+        
+        # Also store raw combined predicate for DuckDB fallback execution
+        combined = self._connection._policy_manager.build_combined_predicate(table, operation)
+        if combined:
+            # Store for use in _execute_direct if needed
+            query_info.rls_predicate = combined
+        
+        return query_info
+    
+    def _parse_policy_predicate(self, predicate_sql: str) -> list:
+        """
+        Parse a policy predicate SQL fragment into Predicate objects.
+        
+        Handles simple predicates like:
+        - column = 'value'
+        - column IN (1, 2, 3)
+        - column > 10
+        
+        For complex predicates (OR, nested), returns a single Predicate
+        with the full SQL as a 'RAW' operator for later injection.
+        
+        Args:
+            predicate_sql: SQL WHERE clause fragment
+            
+        Returns:
+            List of Predicate objects
+        """
+        from waveql.query_planner import Predicate
+        import sqlglot
+        from sqlglot import exp
+        
+        predicates = []
+        
+        try:
+            # Parse the predicate as part of a SELECT statement
+            parsed = sqlglot.parse_one(f"SELECT * FROM t WHERE {predicate_sql}")
+            where = parsed.find(exp.Where)
+            
+            if where:
+                predicates.extend(self._extract_predicates_from_expression(where.this))
+        except Exception as e:
+            # If parsing fails, create a RAW predicate for SQL-level injection
+            logger.debug("RLS: Complex predicate, using RAW: %s", predicate_sql)
+            predicates.append(Predicate(
+                column="__RLS_RAW__",
+                operator="RAW",
+                value=predicate_sql
+            ))
+        
+        return predicates
+    
+    def _extract_predicates_from_expression(self, expr) -> list:
+        """
+        Recursively extract Predicate objects from a sqlglot expression.
+        
+        Args:
+            expr: sqlglot expression node
+            
+        Returns:
+            List of Predicate objects
+        """
+        from waveql.query_planner import Predicate
+        from sqlglot import exp
+        
+        predicates = []
+        
+        if isinstance(expr, exp.And):
+            # Recursively handle AND
+            predicates.extend(self._extract_predicates_from_expression(expr.this))
+            predicates.extend(self._extract_predicates_from_expression(expr.expression))
+        
+        elif isinstance(expr, exp.EQ):
+            # column = value
+            column = self._get_column_name(expr.this)
+            value = self._get_literal_value(expr.expression)
+            if column:
+                predicates.append(Predicate(column=column, operator="=", value=value))
+        
+        elif isinstance(expr, exp.NEQ):
+            column = self._get_column_name(expr.this)
+            value = self._get_literal_value(expr.expression)
+            if column:
+                predicates.append(Predicate(column=column, operator="!=", value=value))
+        
+        elif isinstance(expr, exp.GT):
+            column = self._get_column_name(expr.this)
+            value = self._get_literal_value(expr.expression)
+            if column:
+                predicates.append(Predicate(column=column, operator=">", value=value))
+        
+        elif isinstance(expr, exp.GTE):
+            column = self._get_column_name(expr.this)
+            value = self._get_literal_value(expr.expression)
+            if column:
+                predicates.append(Predicate(column=column, operator=">=", value=value))
+        
+        elif isinstance(expr, exp.LT):
+            column = self._get_column_name(expr.this)
+            value = self._get_literal_value(expr.expression)
+            if column:
+                predicates.append(Predicate(column=column, operator="<", value=value))
+        
+        elif isinstance(expr, exp.LTE):
+            column = self._get_column_name(expr.this)
+            value = self._get_literal_value(expr.expression)
+            if column:
+                predicates.append(Predicate(column=column, operator="<=", value=value))
+        
+        elif isinstance(expr, exp.In):
+            column = self._get_column_name(expr.this)
+            values = []
+            for item in expr.expressions:
+                values.append(self._get_literal_value(item))
+            if column:
+                predicates.append(Predicate(column=column, operator="IN", value=values))
+        
+        elif isinstance(expr, exp.Like):
+            column = self._get_column_name(expr.this)
+            value = self._get_literal_value(expr.expression)
+            if column:
+                predicates.append(Predicate(column=column, operator="LIKE", value=value))
+        
+        elif isinstance(expr, exp.Is):
+            column = self._get_column_name(expr.this)
+            if isinstance(expr.expression, exp.Null):
+                predicates.append(Predicate(column=column, operator="IS", value=None))
+        
+        else:
+            # Fallback: Complex predicate, use RAW
+            predicates.append(Predicate(
+                column="__RLS_RAW__",
+                operator="RAW",
+                value=expr.sql()
+            ))
+        
+        return predicates
+    
+    def _get_column_name(self, expr) -> Optional[str]:
+        """Extract column name from a sqlglot expression."""
+        from sqlglot import exp
+        
+        if isinstance(expr, exp.Column):
+            return expr.name
+        if isinstance(expr, exp.Identifier):
+            return expr.name
+        if hasattr(expr, 'name'):
+            return expr.name
+        return None
+    
+    def _get_literal_value(self, expr):
+        """Extract literal value from a sqlglot expression."""
+        from sqlglot import exp
+        
+        if isinstance(expr, exp.Literal):
+            if expr.is_string:
+                return expr.this
+            elif expr.is_number:
+                # Try to return int or float
+                try:
+                    if '.' in str(expr.this):
+                        return float(expr.this)
+                    return int(expr.this)
+                except ValueError:
+                    return expr.this
+        if isinstance(expr, exp.Null):
+            return None
+        if isinstance(expr, exp.Boolean):
+            return expr.this
+        # Fallback: return string representation
+        return str(expr)
+    
     def _resolve_adapter(self, query_info):
         """Determine which adapter handles this query based on table name."""
         table_name = query_info.table
@@ -306,10 +537,223 @@ class WaveQLCursor:
         # Use default adapter
         return self._connection.get_adapter("default")
     
+    def _classify_predicates(self, query_info, adapter) -> tuple:
+        """
+        Classify predicates into pushable and residual categories.
+        
+        This is the key integration point with QueryOptimizer. It ensures:
+        1. Complex OR conditions are properly handled
+        2. Predicates that can't be pushed are filtered client-side
+        3. No silent dropping of unsupported predicate logic
+        
+        Args:
+            query_info: Parsed query information with predicates
+            adapter: Target adapter
+            
+        Returns:
+            Tuple of (pushable_predicates, residual_predicates, has_residual)
+            - pushable_predicates: List[Predicate] to send to adapter
+            - residual_predicates: List[CompoundPredicate] to filter client-side
+            - has_residual: bool indicating if client-side filtering is needed
+        """
+        from waveql.query_planner import Predicate
+        import sqlglot
+        from sqlglot import exp
+        
+        pushable = []
+        residual = []
+        
+        # Get adapter capabilities
+        adapter_name = getattr(adapter, 'adapter_name', 'default')
+        capabilities = self._optimizer.get_adapter_capabilities(adapter_name)
+        
+        # If no predicates, return early
+        if not query_info.predicates:
+            return pushable, residual, False
+        
+        # We need to re-examine the original WHERE clause for complex OR conditions
+        # that the simple QueryPlanner might have dropped or logged as warnings
+        try:
+            parsed = sqlglot.parse_one(query_info.raw_sql, read="duckdb")
+            where = parsed.find(exp.Where)
+            
+            if where:
+                # Use QueryOptimizer's advanced extraction
+                compound_preds, subqueries = self._optimizer.extract_complex_predicates(where.this)
+                
+                # Now classify each compound predicate
+                for cp in compound_preds:
+                    if cp.can_push_down(capabilities):
+                        # Convert to simple predicates for pushdown
+                        simple = cp.to_simple_predicates()
+                        pushable.extend(simple)
+                    else:
+                        # Cannot push - add to residual for client-side filtering
+                        residual.append(cp)
+                        logger.info(
+                            "Predicate cannot be pushed to %s, will filter client-side: %s",
+                            adapter_name, cp
+                        )
+                
+                has_residual = len(residual) > 0
+                
+                # If we successfully processed with optimizer, return
+                if compound_preds:
+                    return pushable, residual, has_residual
+                    
+        except Exception as e:
+            logger.debug("Failed to use QueryOptimizer for predicate classification: %s", e)
+        
+        # Fallback: Use predicates from QueryPlanner directly
+        # All predicates from the simple planner are considered pushable
+        pushable = query_info.predicates[:]
+        return pushable, [], False
+    
+    def _apply_residual_filter(self, data: pa.Table, residual_predicates: list, query_info) -> pa.Table:
+        """
+        Apply residual predicates as client-side filtering via DuckDB.
+        
+        This is the "Safety Net" that ensures correctness for complex predicates
+        that could not be pushed to the adapter.
+        
+        Args:
+            data: Arrow table with fetched data
+            residual_predicates: List of CompoundPredicate objects to filter
+            query_info: Original query info for context
+            
+        Returns:
+            Filtered Arrow table
+        """
+        if not residual_predicates or data is None or len(data) == 0:
+            return data
+        
+        import uuid
+        
+        # Register data in DuckDB
+        temp_name = f"residual_{uuid.uuid4().hex}"
+        self._connection._duckdb.register(temp_name, data)
+        
+        try:
+            # Build WHERE clause from residual predicates
+            where_parts = []
+            for cp in residual_predicates:
+                sql_part = self._compound_predicate_to_sql(cp)
+                if sql_part:
+                    where_parts.append(f"({sql_part})")
+            
+            if not where_parts:
+                return data
+            
+            where_clause = " AND ".join(where_parts)
+            filter_sql = f'SELECT * FROM "{temp_name}" WHERE {where_clause}'
+            
+            # Add to execution plan
+            step = self.last_plan.add_step(
+                name="Client-side residual filter",
+                type="filter",
+                details={
+                    "predicates": [str(p) for p in residual_predicates],
+                    "sql": filter_sql,
+                    "input_rows": len(data),
+                }
+            )
+            
+            result = self._connection._duckdb.execute(filter_sql).fetch_arrow_table()
+            
+            step.details["output_rows"] = len(result)
+            step.finish()
+            
+            logger.info(
+                "Residual filter: %d rows -> %d rows",
+                len(data), len(result)
+            )
+            
+            return result
+            
+        finally:
+            self._connection._duckdb.unregister(temp_name)
+    
+    def _compound_predicate_to_sql(self, cp) -> str:
+        """
+        Convert a CompoundPredicate to SQL WHERE clause fragment.
+        
+        Args:
+            cp: CompoundPredicate object
+            
+        Returns:
+            SQL string for WHERE clause
+        """
+        from waveql.query_planner import Predicate
+        
+        if cp.type == PredicateType.SIMPLE and cp.predicates:
+            p = cp.predicates[0]
+            if isinstance(p, Predicate):
+                return self._predicate_to_sql(p)
+        
+        if cp.type == PredicateType.OR_GROUP:
+            parts = []
+            for p in cp.predicates:
+                if isinstance(p, CompoundPredicate):
+                    part = self._compound_predicate_to_sql(p)
+                    if part:
+                        parts.append(f"({part})")
+                elif isinstance(p, Predicate):
+                    parts.append(self._predicate_to_sql(p))
+            if parts:
+                return " OR ".join(parts)
+        
+        if cp.type == PredicateType.AND_GROUP:
+            parts = []
+            for p in cp.predicates:
+                if isinstance(p, CompoundPredicate):
+                    part = self._compound_predicate_to_sql(p)
+                    if part:
+                        parts.append(f"({part})")
+                elif isinstance(p, Predicate):
+                    parts.append(self._predicate_to_sql(p))
+            if parts:
+                return " AND ".join(parts)
+        
+        if cp.type == PredicateType.IN_LIST and cp.column:
+            values_str = ", ".join(
+                f"'{v}'" if isinstance(v, str) else str(v)
+                for v in cp.values
+            )
+            return f"{cp.column} IN ({values_str})"
+        
+        return ""
+    
+    def _predicate_to_sql(self, p) -> str:
+        """Convert a simple Predicate to SQL."""
+        if p.operator == "IN":
+            if isinstance(p.value, (list, tuple)):
+                values_str = ", ".join(
+                    f"'{v}'" if isinstance(v, str) else str(v)
+                    for v in p.value
+                )
+                return f"{p.column} IN ({values_str})"
+            return f"{p.column} = {repr(p.value)}"
+        
+        if p.operator in ("IS NULL", "IS NOT NULL"):
+            return f"{p.column} {p.operator}"
+        
+        if isinstance(p.value, str):
+            return f"{p.column} {p.operator} '{p.value}'"
+        elif p.value is None:
+            return f"{p.column} IS NULL"
+        else:
+            return f"{p.column} {p.operator} {p.value}"
+
+    
     def _execute_via_adapter(self, query_info, adapter, parameters) -> pa.Table:
         """Execute query via adapter with predicate pushdown and caching."""
         # Clean the table name to remove schema prefix and quotes for the adapter
         clean_table = self._clean_table_name(query_info.table)
+        
+        # OPTIMIZER INTEGRATION: Classify predicates into pushable vs residual
+        pushable_predicates, residual_predicates, has_residual = self._classify_predicates(
+            query_info, adapter
+        )
         
         # Let adapter fetch data with pushed-down predicates
         if query_info.operation == "SELECT":
@@ -361,18 +805,23 @@ class WaveQLCursor:
                 details={
                     "table": clean_table,
                     "adapter": adapter.adapter_name,
-                    "pushdown_predicates": [str(p) for p in query_info.predicates],
+                    "pushdown_predicates": [str(p) for p in pushable_predicates],
+                    "residual_predicates": [str(p) for p in residual_predicates] if has_residual else [],
+                    "has_client_side_filter": has_residual,
                     "cache_miss": cache_key is not None,
                 }
             )
             start_time = time.perf_counter()
             try:
-                data = adapter.fetch(
+                # Use traced_fetch for automatic provenance capture
+                # OPTIMIZER INTEGRATION: Use pushable_predicates instead of raw predicates
+                data = traced_fetch(
+                    adapter=adapter,
                     table=clean_table,
                     columns=query_info.columns,
-                    predicates=query_info.predicates,
-                    limit=query_info.limit,
-                    offset=query_info.offset,
+                    predicates=pushable_predicates,  # Use classified pushable predicates
+                    limit=query_info.limit if not has_residual else None,  # Don't limit if we need to filter
+                    offset=query_info.offset if not has_residual else None,  # Don't offset if we need to filter
                     order_by=query_info.order_by,
                     group_by=query_info.group_by,
                     aggregates=query_info.aggregates,
@@ -399,6 +848,17 @@ class WaveQLCursor:
                         step.details["source_query"] = source_query.decode("utf-8")
                 
                 step.finish()
+                
+                # SAFETY NET: Apply residual predicates that couldn't be pushed to the adapter
+                if has_residual and data is not None and len(data) > 0:
+                    data = self._apply_residual_filter(data, residual_predicates, query_info)
+                    
+                    # Apply LIMIT and OFFSET after client-side filtering
+                    if query_info.offset and query_info.offset > 0:
+                        data = data.slice(query_info.offset)
+                    if query_info.limit and query_info.limit > 0:
+                        data = data.slice(0, query_info.limit)
+                
                 self._rowcount = len(data) if data else 0
                 
                 # Store in cache if enabled
@@ -755,7 +1215,6 @@ class WaveQLCursor:
                      temp_name = f"t_{uuid.uuid4().hex}"
                      self._connection.duckdb.register(temp_name, data)
                      registered_tables.append(temp_name)
-                     
                      if "." in table_name:
                          parts = table_name.split(".")
                          # Create intermediate schemas if needed

@@ -48,6 +48,9 @@ class CDCStream:
         self.connection = connection
         self.table = table
         self.config = config or CDCConfig()
+        # Private aliases for test compatibility
+        self._table = self.table
+        self._config = self.config
         self._running = False
         self._stream_state = ChangeStream(table=table, adapter="")
         

@@ -13,7 +13,14 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 import pyarrow as pa
-import anyio
+try:
+    import anyio
+except ImportError:
+    anyio = None
+try:
+    import httpx
+except ImportError:
+    httpx = None
 
 from waveql.adapters.base import BaseAdapter
 from waveql.exceptions import AdapterError, QueryError
@@ -66,6 +73,7 @@ class StripeAdapter(BaseAdapter):
     ):
         super().__init__(host, auth_manager, schema_cache, **kwargs)
         self._api_key = kwargs.get("api_key") or kwargs.get("password")
+        self._api_version = kwargs.get("api_version")
         self._config = kwargs
 
     async def fetch_async(
@@ -241,7 +249,90 @@ class StripeAdapter(BaseAdapter):
             raise AdapterError(f"Stripe list failed: {e}")
 
     def fetch(self, *args, **kwargs) -> pa.Table:
-        return anyio.run(lambda: self.fetch_async(*args, **kwargs))
+        """
+        Synchronous fetch using sync httpx directly.
+        
+        Note: Uses sync httpx here instead of anyio.run() because
+        async DNS resolution fails on some Windows configurations.
+        """
+        return self._fetch_sync(*args, **kwargs)
+    
+    def _fetch_sync(
+        self,
+        table: str,
+        columns: List[str] = None,
+        predicates: List["Predicate"] = None,
+        limit: int = None,
+        offset: int = None,
+        order_by: List[tuple] = None,
+        group_by: List[str] = None,
+        aggregates: List[Any] = None,
+    ) -> pa.Table:
+        """Synchronous fetch using sync httpx."""
+        import httpx
+        import time
+        
+        resource = self.RESOURCE_MAP.get(table.lower(), table.lower())
+        
+        # For simple COUNT optimization, still use async path (less frequent)
+        if self._is_simple_count(aggregates, group_by):
+            return anyio.run(lambda: self._fetch_count_only(resource, predicates, aggregates))
+        
+        url = f"https://{self._host}/v1/{resource}"
+        params = {}
+        if limit:
+            params["limit"] = min(100, limit)
+        
+        headers = {}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        
+        results = []
+        max_retries = 5
+        base_delay = 1.0
+        
+        for attempt in range(max_retries):
+            try:
+                with httpx.Client(timeout=30.0) as client:
+                    current_params = params.copy()
+                    while True:
+                        response = client.get(url, params=current_params, headers=headers)
+                        if response.status_code >= 400:
+                            raise AdapterError(f"Stripe API error ({response.status_code}): {response.text}")
+                        
+                        data = response.json()
+                        batch = data.get("data", [])
+                        results.extend(batch)
+                        
+                        if not data.get("has_more") or (limit and len(results) >= limit):
+                            break
+                        
+                        # Cursor pagination
+                        current_params["starting_after"] = results[-1]["id"]
+                
+                if limit:
+                    results = results[:limit]
+                
+                result_table = pa.Table.from_pylist(results) if results else pa.table({})
+                
+                # Apply client-side aggregation if requested
+                if aggregates and len(result_table) > 0:
+                    result_table = self._compute_client_side_aggregates(result_table, group_by, aggregates)
+                
+                return result_table
+                
+            except httpx.ConnectError as e:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(f"Stripe request failed (attempt {attempt + 1}/{max_retries}), retrying in {delay}s: {e}")
+                    time.sleep(delay)
+                    results = []  # Reset for retry
+                else:
+                    raise AdapterError(f"Stripe fetch failed after {max_retries} attempts: {e}")
+            except Exception as e:
+                if isinstance(e, AdapterError):
+                    raise
+                raise AdapterError(f"Stripe list failed: {e}")
 
     def get_schema(self, table: str) -> List[ColumnInfo]:
         """Synchronous get_schema (runs async)."""
@@ -294,17 +385,41 @@ class StripeAdapter(BaseAdapter):
         return anyio.run(lambda: self.delete_async(table, predicates, parameters))
 
     async def _request_async(self, method: str, url: str, **kwargs) -> Any:
+        """Make an HTTP request with retry logic for transient failures."""
         import httpx
+        import asyncio
+        
         headers = kwargs.get("headers", {})
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
         kwargs["headers"] = headers
         
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.request(method, url, **kwargs)
-            if response.status_code >= 400:
-                raise AdapterError(f"Stripe API error ({response.status_code}): {response.text}")
-            return response
+        max_retries = 5
+        base_delay = 1.0  # seconds - longer delay for DNS stability
+        
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.request(method, url, **kwargs)
+                    if response.status_code >= 400:
+                        raise AdapterError(f"Stripe API error ({response.status_code}): {response.text}")
+                    return response
+            except httpx.ConnectError as e:
+                # Retry on connection/DNS errors
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)  # Exponential backoff
+                    logger.warning(f"Stripe request failed (attempt {attempt + 1}/{max_retries}), retrying in {delay}s: {e}")
+                    await asyncio.sleep(delay)
+                else:
+                    raise
+            except httpx.TimeoutException as e:
+                # Retry on timeout
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(f"Stripe request timed out (attempt {attempt + 1}/{max_retries}), retrying in {delay}s: {e}")
+                    await asyncio.sleep(delay)
+                else:
+                    raise AdapterError(f"Stripe request timed out after {max_retries} attempts: {e}")
 
     async def update_async(self, table: str, values: Dict[str, Any], predicates: List["Predicate"] = None, parameters: Sequence = None) -> int:
         resource = self.RESOURCE_MAP.get(table.lower(), table.lower())

@@ -892,6 +892,10 @@ class ResourceAwareExecutor:
             self._adaptive_pagination.record_rate_limit(adapter_name, table_name)
         else:
             self._adaptive_pagination.record_success(
+                adapter_name=adapter_name,
+                table_name=table_name,
+                rows_fetched=rows_fetched,
+                duration=duration,
             )
         
         # Update JoinOptimizer per-table stats for real-time latency tracking

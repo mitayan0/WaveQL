@@ -9,6 +9,7 @@ Tests cover:
 """
 
 import pytest
+from unittest.mock import Mock, patch
 
 from waveql.connection_base import ConnectionMixin
 
@@ -242,7 +243,7 @@ class TestCreateAuthManager:
         
         assert auth_manager is not None
         assert auth_manager._username == "admin"
-        assert auth_manager._password == "password123"
+        assert auth_manager._password.get_secret_value() == "password123"
     
     def test_api_key_auth_manager(self):
         """Test creating AuthManager with API key."""
@@ -251,7 +252,7 @@ class TestCreateAuthManager:
         )
         
         assert auth_manager is not None
-        assert auth_manager._api_key == "sk-test-12345"
+        assert auth_manager._api_key.get_secret_value() == "sk-test-12345"
     
     def test_oauth_token_auth_manager(self):
         """Test creating AuthManager with OAuth token."""
@@ -262,8 +263,19 @@ class TestCreateAuthManager:
         assert auth_manager is not None
         assert auth_manager._oauth_token == "access_token_12345"
     
-    def test_oauth_params_auth_manager(self):
+    @patch("waveql.auth.manager.requests.post")
+    def test_oauth_params_auth_manager(self, mock_post):
         """Test creating AuthManager with OAuth params."""
+        # Mock the token response
+        mock_response = Mock()
+        mock_response.ok = True
+        mock_response.json.return_value = {
+            "access_token": "test_token",
+            "token_type": "Bearer",
+            "expires_in": 3600
+        }
+        mock_post.return_value = mock_response
+        
         auth_manager = ConnectionMixin.create_auth_manager_from_params(
             oauth_token_url="https://auth.example.com/token",
             oauth_client_id="client_123",
@@ -277,7 +289,13 @@ class TestCreateAuthManager:
         assert auth_manager._oauth_client_secret == "secret_456"
     
     def test_combined_auth_manager(self):
-        """Test creating AuthManager with multiple auth methods."""
+        """Test creating AuthManager with multiple auth methods.
+        
+        AuthManager is a facade that picks ONE auth strategy based on priority:
+        OAuth2 > API Key > Basic Auth > JWT
+        
+        When oauth_token is provided (even with username/api_key), OAuth2 takes priority.
+        """
         auth_manager = ConnectionMixin.create_auth_manager_from_params(
             username="admin",
             password="pass",
@@ -286,10 +304,26 @@ class TestCreateAuthManager:
         )
         
         assert auth_manager is not None
-        # All should be set
-        assert auth_manager._username == "admin"
-        assert auth_manager._api_key == "key123"
+        # OAuth2 takes priority when oauth_token is provided
+        assert auth_manager.auth_type == "oauth2"
         assert auth_manager._oauth_token == "token456"
+        
+        # Test API Key priority (no oauth_token)
+        auth_manager_api = ConnectionMixin.create_auth_manager_from_params(
+            username="admin",
+            password="pass",
+            api_key="key123",
+        )
+        assert auth_manager_api.auth_type == "api_key"
+        assert auth_manager_api._api_key.get_secret_value() == "key123"
+        
+        # Test Basic Auth priority (no oauth_token, no api_key)
+        auth_manager_basic = ConnectionMixin.create_auth_manager_from_params(
+            username="admin",
+            password="pass",
+        )
+        assert auth_manager_basic.auth_type == "basic"
+        assert auth_manager_basic._username == "admin"
 
 
 class TestConnectionMixinIntegration:
@@ -308,7 +342,7 @@ class TestConnectionMixinIntegration:
         assert parsed["adapter"] == "servicenow"
         assert parsed["host"] == "dev.service-now.com"
         assert auth_manager._username == "admin"
-        assert auth_manager._password == "secret"
+        assert auth_manager._password.get_secret_value() == "secret"
     
     def test_full_connection_flow(self):
         """Test complete connection parsing flow."""

@@ -124,6 +124,13 @@ from waveql.resource_optimizer import (
     get_resource_executor,
 )
 
+# Row-Level Security (Enterprise Features)
+from waveql.security import (
+    SecurityPolicy,
+    PolicyManager,
+    PolicyViolationError,
+)
+
 # Note: ChunkedExecutor is now internal - chunking happens automatically
 # via BaseAdapter.fetch_with_auto_chunking(). No user configuration needed.
 
@@ -229,6 +236,11 @@ __all__ = [
     "get_budget_planner",
     "get_resource_executor",
     
+    # Row-Level Security (Enterprise Features)
+    "SecurityPolicy",
+    "PolicyManager",
+    "PolicyViolationError",
+    
     # Async
     "AsyncWaveQLConnection",
     "AsyncWaveQLCursor",
@@ -244,6 +256,40 @@ __all__ = [
 apilevel = "2.0"
 threadsafety = 1
 paramstyle = "qmark"
+
+# DB-API 2.0 Exceptions
+class Warning(Exception):
+    pass
+
+class Error(Exception):
+    pass
+
+class InterfaceError(Error):
+    pass
+
+class DatabaseError(Error):
+    pass
+
+class DataError(DatabaseError):
+    pass
+
+class OperationalError(DatabaseError):
+    pass
+
+class IntegrityError(DatabaseError):
+    pass
+
+class InternalError(DatabaseError):
+    pass
+
+class ProgrammingError(DatabaseError):
+    pass
+
+class NotSupportedError(DatabaseError):
+    pass
+
+# Map internal exceptions to DB-API exceptions where possible
+# (Ideally, we would inherit from these, but for now we define them for SQLAlchemy compliance)
 
 
 def connect(
