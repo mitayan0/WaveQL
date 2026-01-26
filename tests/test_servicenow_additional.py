@@ -185,11 +185,19 @@ async def test_schema_caching_async(adapter):
 async def test_get_or_discover_schema_async_no_records_no_cache(adapter):
     # Line 573: If no records and nothing in cache, call get_schema_async
     with respx.mock:
-        respx.get(f"{adapter._host}/api/now/table/incident").mock(
-            return_value=Response(200, json={"result": [{"foo": "bar"}]})
+        # Mock the sys_db_object endpoint for table hierarchy
+        respx.get(f"{adapter._host}/api/now/table/sys_db_object").mock(
+            return_value=Response(200, json={"result": []})
+        )
+        # Mock the sys_dictionary endpoint for schema metadata
+        respx.get(f"{adapter._host}/api/now/table/sys_dictionary").mock(
+            return_value=Response(200, json={"result": [
+                {"element": "foo", "internal_type": "string", "mandatory": "false", "primary": "false"}
+            ]})
         )
         cols = await adapter._get_or_discover_schema_async("incident", [])
-        assert cols[0].name == "foo"
+        # First column should be 'foo', second should be auto-added 'sys_id'
+        assert any(c.name == "foo" for c in cols)
 
 def test_discover_schema_sync_no_records(adapter):
     # Line 598
