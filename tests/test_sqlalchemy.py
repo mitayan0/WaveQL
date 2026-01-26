@@ -59,7 +59,8 @@ def test_sqlalchemy_dialect():
     assert len(set(schemas)) == 1 or "servicenow" not in schemas
     
     pk = inspector.get_pk_constraint("incident")
-    assert pk["constrained_columns"] == [] # unless we mock PK
+    # ServiceNow adapter now correctly identifies sys_id as the primary key
+    assert pk["constrained_columns"] == ["sys_id"]
     
     assert inspector.get_foreign_keys("incident") == []
     assert inspector.get_indexes("incident") == []

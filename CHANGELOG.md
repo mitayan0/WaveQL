@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.8] - 2026-01-26
+
+### Fixed
+- **Optimizer Integration**: Integrated `QueryOptimizer` with `WaveQLCursor` to unify predicate logic.
+- **Safety Net**: Added client-side filtering fallback (`_apply_residual_filter`) for non-pushable predicates.
+- **Correctness**: Fixed complex boolean logic handling (e.g., OR conditions) to prevent data loss.
+
 ## [0.1.7] - 2026-01-11
 
 ### Added

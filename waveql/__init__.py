@@ -135,7 +135,7 @@ from waveql.security import (
 # via BaseAdapter.fetch_with_auto_chunking(). No user configuration needed.
 
 
-__version__ = "0.1.7"
+__version__ = "0.1.8"
 
 # Everything users might need - just import from waveql
 __all__ = [
