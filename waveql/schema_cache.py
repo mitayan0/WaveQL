@@ -42,6 +42,7 @@ class TableSchema:
         return time.time() - self.discovered_at > self.ttl
     
     def to_dict(self) -> Dict:
+        # Exclude arrow_type from serialization as PyArrow types are not JSON serializable
         return {
             "name": self.name,
             "columns": [{"name": c.name, "data_type": c.data_type, "nullable": c.nullable,

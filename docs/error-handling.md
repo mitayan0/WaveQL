@@ -30,3 +30,19 @@ except AdapterError as e:
 1.  **Catch Specifics**: Capture `RateLimitError` to implement backoff.
 2.  **Schema Drift**: On `SchemaEvolutionError`, clear cache & reload.
 3.  **Logs**: Log `e.context` for debugging.
+4.  **Transient Errors**: Stripe, Shopify, and HubSpot adapters automatically retry on:
+    - `ConnectError` - DNS/connection failures
+    - `NetworkError` - Network-level failures
+    - `ReadError` - Read operation failures
+    - `TimeoutException` - Request timeouts
+    
+    All use exponential backoff (base 1s, max 5 retries).
+
+## Retry Behavior by Adapter
+
+| Adapter | Connect | Network | Read | Timeout | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Stripe** | ✅ | ✅ | ✅ | ✅ | Full retry coverage |
+| **Shopify** | ✅ | ✅ | ✅ | ✅ | Full retry coverage |
+| **HubSpot** | ✅ | ✅ | ✅ | ✅ | Native async with retry |
+| **REST** | ✅ | ❌ | ❌ | ❌ | Via `_rate_limiter` |

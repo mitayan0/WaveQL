@@ -130,15 +130,23 @@ def test_limit_offset(cursor):
     """Test 5: LIMIT and OFFSET"""
     separator("5. LIMIT / OFFSET Pagination")
     
-    cursor.execute("SELECT number FROM incident ORDER BY number LIMIT 3 OFFSET 0")
-    page1 = [row['number'] for row in cursor]
-    print(f"  Page 1: {page1}")
+    # Use sys_created_on for ordering since number field may not sort predictably
+    # for pagination purposes in ServiceNow
+    cursor.execute("SELECT number, sys_created_on FROM incident ORDER BY sys_created_on DESC LIMIT 3 OFFSET 0")
+    page1 = [(row['number'], row['sys_created_on']) for row in cursor]
+    print(f"  Page 1: {[n for n, _ in page1]}")
     
-    cursor.execute("SELECT number FROM incident ORDER BY number LIMIT 3 OFFSET 3")
-    page2 = [row['number'] for row in cursor]
-    print(f"  Page 2: {page2}")
+    cursor.execute("SELECT number, sys_created_on FROM incident ORDER BY sys_created_on DESC LIMIT 3 OFFSET 3")
+    page2 = [(row['number'], row['sys_created_on']) for row in cursor]
+    print(f"  Page 2: {[n for n, _ in page2]}")
     
-    assert set(page1).isdisjoint(set(page2)), "Pages should not overlap!"
+    # Check that pages don't overlap using timestamps
+    page1_times = [t for _, t in page1]
+    page2_times = [t for _, t in page2]
+    
+    # Pages should not have the same timestamps
+    overlap = set(page1_times) & set(page2_times)
+    assert len(overlap) == 0, f"Pages should not overlap! Overlapping timestamps: {overlap}"
     print("  ✓ LIMIT/OFFSET pagination works")
     return True
 

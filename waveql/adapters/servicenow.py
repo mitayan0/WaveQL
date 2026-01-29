@@ -319,6 +319,10 @@ class ServiceNowAdapter(BaseAdapter):
         selected_columns: List[str] = None,
     ) -> pa.Table:
         """Convert records to Arrow table with native struct support."""
+        # Process records to extract display values from reference fields
+        if self._display_value and records:
+            records = self._extract_display_values(records)
+        
         if not records:
             # Return empty table with schema
             fields = []
@@ -351,6 +355,20 @@ class ServiceNowAdapter(BaseAdapter):
         
         # Convert using the new utility with struct support
         return records_to_arrow_table(filtered_records, schema=schema)
+    
+    def _extract_display_values(self, records: List[Dict]) -> List[Dict]:
+        """Extract display_value from reference field dicts when display_value mode is enabled."""
+        processed = []
+        for record in records:
+            processed_record = {}
+            for key, value in record.items():
+                if isinstance(value, dict) and 'display_value' in value:
+                    # Extract just the display value from reference fields
+                    processed_record[key] = value['display_value']
+                else:
+                    processed_record[key] = value
+            processed.append(processed_record)
+        return processed
 
     async def _fetch_all_pages_async(self, url: str, params: Dict, limit: int = None) -> List[Dict]:
         """Fetch all pages asynchronously with parallel requests."""
@@ -428,7 +446,7 @@ class ServiceNowAdapter(BaseAdapter):
         """Fetch all pages sequentially until a partial page is returned."""
         all_records = []
         page_size = int(params.get("sysparm_limit", self._page_size))
-        offset = 0
+        offset = int(params.get("sysparm_offset", 0))
         
         # Use a single client for session persistence
         with httpx.Client(timeout=self._timeout) as client:

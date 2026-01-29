@@ -7,10 +7,11 @@
 | **ServiceNow** | `servicenow://` | `sysparm_query` | ✅ Server | ✅ CRUD | ✅ Dynamic | Parallel fetch, CDC |
 | **Salesforce** | `salesforce://` | `SOQL` | ✅ Server | ✅ CRUD | ✅ Dynamic | Bulk API |
 | **Jira** | `jira://` | `JQL` | ✅ Client | ✅ Issue | ✅ Dynamic | Projects/Issues/Users |
-| **HubSpot** | `hubspot://` | Search API | ✅ Smart* | ✅ CRUD | ✅ Dynamic | *Optimized COUNT(*) |
+| **HubSpot** | `hubspot://` | Search API | ✅ Smart* | ✅ CRUD | ✅ Dynamic | *Optimized COUNT(*), Native Async |
 | **Shopify** | `shopify://` | Partial | ✅ Smart* | ✅ CRUD | ⚠️ Inferred | *Count Endpoint |
 | **Zendesk** | `zendesk://` | Search API | ✅ Smart* | ✅ CRUD | ⚠️ Inferred | |
-| **Stripe** | `stripe://` | Search/List | ✅ Smart* | ✅ CRUD | ⚠️ Inferred | |
+| **Stripe** | `stripe://` | Search/List | ✅ Smart* | ✅ CRUD | ⚠️ Inferred | *Robust retry logic |
+| **Generic REST** | `http://` | Params | ❌ | ✅ CRUD | ✅ Config | *ORDER BY support |
 | **SQL DB** | `postgresql://` | Full SQL | ✅ Server | ✅ CRUD | ✅ Dynamic | SQLAlchemy wrapper |
 | **Cloud Storage** | `s3://`, `gs://` | DuckDB | ✅ DuckDB | ❌ Read-Only | ✅ Parquet | Delta Lake / Iceberg |
 | **Generic REST** | `http://` | Params | ❌ | ✅ CRUD | ✅ Config | |
@@ -53,9 +54,24 @@ SELECT key, summary FROM issues WHERE project = 'KAN'
 *   **Pushdown**: Search API v3 filters.
 *   **Pagination**: Cursor-based.
 *   **Smart COUNT**: `SELECT COUNT(*) FROM contacts` -> 1 API call (uses metadata).
+*   **Async**: Full native async support with `httpx.AsyncClient`.
 
 ```sql
 SELECT firstname, email FROM contacts WHERE email LIKE '%@example.com'
+```
+
+### HubSpot Async Operations
+
+```python
+# Async fetch
+result = await adapter.fetch_async("contacts", limit=100)
+
+# Async CRUD
+await adapter.insert_async("contacts", {"email": "new@example.com"})
+await adapter.update_async("contacts", {"firstname": "John"},
+                           [Predicate(column="id", operator="=", value="123")])
+await adapter.delete_async("contacts",
+                           [Predicate(column="id", operator="=", value="123")])
 ```
 
 ## 5. Cloud Storage (S3/GCS)
@@ -71,10 +87,44 @@ SELECT * FROM "s3://logs/*.parquet" WHERE year = 2024
 *   **URI**: `http://api.example.com`
 *   **Config**: Map tables to endpoints manually via `RESTAdapter`.
 *   **Pushdown**: Param-based filtering.
+*   **Features**:
+  - `list_tables()` returns configured endpoints
+  - Client-side `ORDER BY` support
+  - Full CRUD operations (INSERT/UPDATE/DELETE)
 
 ```python
-adapter = RESTAdapter("https://api.com", endpoints={"users": "/v1/users"})
-cursor.execute("SELECT * FROM users WHERE role = 'admin'")
+adapter = RESTAdapter(
+    "https://api.com",
+    endpoints={"users": "/v1/users"},
+    data_path="results"  # JSON path to data array
+)
+cursor.execute("SELECT * FROM users WHERE role = 'admin' ORDER BY name")
+```
+
+### RESTAdapter Configuration
+
+| Parameter | Type | Description |
+| :--- | :--- | :--- |
+| `endpoints` | `Dict[str, Dict]` | Table name to endpoint config mapping |
+| `data_path` | `str` | JSON path to data array (e.g., "results", "data.items") |
+| `timeout` | `int` | Request timeout in seconds (default: 30) |
+| `max_auto_fetch` | `int` | Safety limit for auto-pagination (default: 5000) |
+
+### Endpoint Configuration
+
+```python
+endpoints = {
+    "users": {
+        "path": "/v1/users",
+        "method": "GET",
+        "supports_filter": True,
+        "supports_limit": True,
+        "supports_offset": True,
+        "supports_like": False,
+        "filter_format": "query",  # or "json"
+        "id_field": "id",  # for UPDATE/DELETE
+    }
+}
 ```
 
 ## Custom Adapters

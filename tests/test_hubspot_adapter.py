@@ -184,29 +184,34 @@ class TestHubSpotAdapterSchema:
     """Tests for schema discovery."""
     
     def test_get_schema(self):
-        """Test getting schema. Schema uses GET on properties API."""
-        with patch("httpx.Client") as MockClient:
-            mock_client = MockClient.return_value.__enter__.return_value
-            
-            # get_schema uses request("GET", ...)
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = {
-                "results": [
-                    {"name": "email", "type": "string", "fieldType": "text"},
-                    {"name": "firstname", "type": "string", "fieldType": "text"},
-                ]
-            }
-            mock_client.request.return_value = mock_response
-            
-            adapter = HubSpotAdapter(
-                host="api.hubapi.com",
-                api_key="test-key",
-            )
-            
-            schema = adapter.get_schema("contacts")
-            
-            assert isinstance(schema, list)
+        """Test getting schema. Schema uses GET on properties API via async method."""
+        import anyio
+        
+        async def _run_test():
+            with patch("httpx.AsyncClient") as MockClient:
+                mock_client = MockClient.return_value.__aenter__.return_value
+                
+                # get_schema_async uses client.request("GET", ...)
+                mock_response = MagicMock()
+                mock_response.status_code = 200
+                mock_response.json.return_value = {
+                    "results": [
+                        {"name": "email", "type": "string", "fieldType": "text"},
+                        {"name": "firstname", "type": "string", "fieldType": "text"},
+                    ]
+                }
+                mock_client.request.return_value = mock_response
+                
+                adapter = HubSpotAdapter(
+                    host="api.hubapi.com",
+                    api_key="test-key",
+                )
+                
+                schema = await adapter.get_schema_async("contacts")
+                
+                assert isinstance(schema, list)
+        
+        anyio.run(_run_test)
 
 
 class TestHubSpotAdapterListTables:
@@ -321,12 +326,12 @@ class TestHubSpotAdapterAsync:
     """Tests for async operations."""
     
     def test_fetch_async(self):
-        """Test async fetch. Uses anyio to wrap sync call, so we patch sync Client still."""
+        """Test async fetch. Uses httpx.AsyncClient for true async I/O."""
         import anyio
         
         async def _run_test():
-            with patch("httpx.Client") as MockClient:
-                mock_client = MockClient.return_value.__enter__.return_value
+            with patch("httpx.AsyncClient") as MockClient:
+                mock_client = MockClient.return_value.__aenter__.return_value
                 
                 mock_response = MagicMock()
                 mock_response.status_code = 200
@@ -351,40 +356,50 @@ class TestHubSpotAdapterCRUD:
     
     def test_insert(self):
         """Test insert operation."""
-        with patch("httpx.Client") as MockClient:
-            mock_client = MockClient.return_value.__enter__.return_value
-            
-            mock_response = MagicMock()
-            mock_response.status_code = 201
-            mock_response.json.return_value = {"id": "123", "properties": {}}
-            mock_client.request.return_value = mock_response
-            
-            adapter = HubSpotAdapter(
-                host="api.hubapi.com",
-                api_key="test-key",
-            )
-            
-            result = adapter.insert("contacts", {"email": "new@test.com", "firstname": "New"})
-            assert result == 1
+        import anyio
+        
+        async def _run_test():
+            with patch("httpx.AsyncClient") as MockClient:
+                mock_client = MockClient.return_value.__aenter__.return_value
+                
+                mock_response = MagicMock()
+                mock_response.status_code = 201
+                mock_response.json.return_value = {"id": "123", "properties": {}}
+                mock_client.request.return_value = mock_response
+                
+                adapter = HubSpotAdapter(
+                    host="api.hubapi.com",
+                    api_key="test-key",
+                )
+                
+                result = await adapter.insert_async("contacts", {"email": "new@test.com", "firstname": "New"})
+                assert result == 1
+        
+        anyio.run(_run_test)
     
     def test_update_with_id(self):
         """Test update operation with ID predicate."""
-        with patch("httpx.Client") as MockClient:
-            mock_client = MockClient.return_value.__enter__.return_value
-            
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = {"id": "123", "properties": {}}
-            mock_client.request.return_value = mock_response
-            
-            adapter = HubSpotAdapter(
-                host="api.hubapi.com",
-                api_key="test-key",
-            )
-            
-            predicates = [Predicate(column="id", operator="=", value="123")]
-            result = adapter.update("contacts", {"firstname": "Updated"}, predicates)
-            assert result == 1
+        import anyio
+        
+        async def _run_test():
+            with patch("httpx.AsyncClient") as MockClient:
+                mock_client = MockClient.return_value.__aenter__.return_value
+                
+                mock_response = MagicMock()
+                mock_response.status_code = 200
+                mock_response.json.return_value = {"id": "123", "properties": {}}
+                mock_client.request.return_value = mock_response
+                
+                adapter = HubSpotAdapter(
+                    host="api.hubapi.com",
+                    api_key="test-key",
+                )
+                
+                predicates = [Predicate(column="id", operator="=", value="123")]
+                result = await adapter.update_async("contacts", {"firstname": "Updated"}, predicates)
+                assert result == 1
+        
+        anyio.run(_run_test)
     
     def test_update_without_id_raises(self):
         """Test update without ID raises error."""
@@ -399,22 +414,27 @@ class TestHubSpotAdapterCRUD:
     
     def test_delete_with_id(self):
         """Test delete operation with ID predicate."""
-        with patch("httpx.Client") as MockClient:
-            mock_client = MockClient.return_value.__enter__.return_value
-            
-            mock_response = MagicMock()
-            mock_response.status_code = 204
-            mock_response.json.return_value = {}
-            mock_client.request.return_value = mock_response
-            
-            adapter = HubSpotAdapter(
-                host="api.hubapi.com",
-                api_key="test-key",
-            )
-            
-            predicates = [Predicate(column="id", operator="=", value="123")]
-            result = adapter.delete("contacts", predicates)
-            assert result == 1
+        import anyio
+        
+        async def _run_test():
+            with patch("httpx.AsyncClient") as MockClient:
+                mock_client = MockClient.return_value.__aenter__.return_value
+                
+                mock_response = MagicMock()
+                mock_response.status_code = 204
+                mock_response.json.return_value = {}
+                mock_client.request.return_value = mock_response
+                
+                adapter = HubSpotAdapter(
+                    host="api.hubapi.com",
+                    api_key="test-key",
+                )
+                
+                predicates = [Predicate(column="id", operator="=", value="123")]
+                result = await adapter.delete_async("contacts", predicates)
+                assert result == 1
+        
+        anyio.run(_run_test)
     
     def test_delete_without_id_raises(self):
         """Test delete without ID raises error."""

@@ -7,6 +7,7 @@ Allows querying any REST API with configurable endpoints.
 from __future__ import annotations
 import json
 import logging
+import re
 from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 
 import requests
@@ -200,6 +201,10 @@ class RESTAdapter(BaseAdapter):
                 if unhandled_predicates:
                     records = self._apply_filters(records, unhandled_predicates)
                 
+                # Apply client-side sorting if order_by specified and not pushed
+                if order_by:
+                    records = self._apply_order_by(records, order_by)
+                
                 # Apply limit/offset if not done server-side
                 # Note: We accumulated 'fetched_count' records starting from 'offset' (if pushed) or 0.
                 
@@ -356,7 +361,6 @@ class RESTAdapter(BaseAdapter):
                         match = str_val in str_p_values
                         
                 elif pred.operator == "LIKE":
-                    import re
                     pattern = pred.value.replace("%", ".*").replace("_", ".")
                     # Ensure value is string
                     match = bool(re.search(pattern, str(value or ""), re.IGNORECASE))
@@ -368,7 +372,22 @@ class RESTAdapter(BaseAdapter):
                 filtered.append(record)
         
         return filtered
-    
+
+    def _apply_order_by(self, records: List[Dict], order_by: List[tuple]) -> List[Dict]:
+        """Apply client-side sorting for order_by clauses."""
+        if not order_by or not records:
+            return records
+        
+        # Sort by multiple columns - reverse order for stable sorting
+        for col, direction in reversed(order_by):
+            reverse = direction.upper() == "DESC"
+            records = sorted(
+                records,
+                key=lambda r: (r.get(col) is None, r.get(col)),
+                reverse=reverse
+            )
+        return records
+
     def _get_or_discover_schema(self, table: str, records: List[Dict]) -> List[ColumnInfo]:
         """Discover schema from records using multi-sample inference with struct support."""
         cached = self._get_cached_schema(table)
@@ -460,6 +479,10 @@ class RESTAdapter(BaseAdapter):
         # Fetch one record to discover
         records = self.fetch(table, limit=1).to_pylist()
         return self._get_or_discover_schema(table, records)
+
+    def list_tables(self) -> List[str]:
+        """List available tables from configured endpoints."""
+        return list(self._endpoints.keys())
     
     def insert(self, table: str, values: Dict[str, Any], parameters: Sequence = None) -> int:
         """Insert via POST."""
@@ -569,7 +592,15 @@ class RESTAdapter(BaseAdapter):
         """Fetch data from REST endpoint (async fallback via thread pool)."""
         import asyncio
         return await asyncio.to_thread(
-            self.fetch, table, columns, predicates, limit, offset, order_by, group_by, aggregates
+            self.fetch,
+            table=table,
+            columns=columns,
+            predicates=predicates,
+            limit=limit,
+            offset=offset,
+            order_by=order_by,
+            group_by=group_by,
+            aggregates=aggregates,
         )
 
     async def get_schema_async(self, table: str) -> List[ColumnInfo]:
