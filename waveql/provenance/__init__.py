@@ -33,6 +33,7 @@ from waveql.provenance.models import (
     PredicateMatch,
     RowProvenance,
     QueryProvenance,
+    JoinTransformation,
 )
 from waveql.provenance.tracker import (
     ProvenanceTracker,
@@ -51,6 +52,7 @@ __all__ = [
     "PredicateMatch",
     "RowProvenance",
     "QueryProvenance",
+    "JoinTransformation",
     # Tracker
     "ProvenanceTracker",
     "get_provenance_tracker",

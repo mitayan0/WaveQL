@@ -25,6 +25,7 @@ from waveql.provenance.models import (
     PredicateMatch,
     RowProvenance,
     QueryProvenance,
+    JoinTransformation,
 )
 
 if TYPE_CHECKING:
@@ -291,6 +292,54 @@ class ProvenanceTracker:
         )
         
         self.current_query.row_provenance.append(row_prov)
+    
+    def record_join_transformation(
+        self,
+        left_table: str,
+        right_table: str,
+        left_column: str,
+        right_column: str,
+        join_type: str = "INNER",
+    ):
+        """
+        Record a join transformation for How-Provenance.
+        
+        This method captures how data from multiple tables was combined
+        during query execution, enabling full How-Provenance tracking.
+        
+        Args:
+            left_table: Fully qualified name of the left table (e.g., "servicenow.incident")
+            right_table: Fully qualified name of the right table (e.g., "salesforce.contact")
+            left_column: Column from the left table used in join condition
+            right_column: Column from the right table used in join condition
+            join_type: Type of join (INNER, LEFT, RIGHT, FULL, CROSS)
+        
+        Example:
+            >>> tracker.record_join_transformation(
+            ...     left_table="servicenow.incident",
+            ...     right_table="salesforce.contact",
+            ...     left_column="caller_id",
+            ...     right_column="Id",
+            ...     join_type="LEFT",
+            ... )
+        """
+        if not self.enabled or not self.current_query:
+            return
+        
+        join_transform = JoinTransformation(
+            left_table=left_table,
+            right_table=right_table,
+            left_column=left_column,
+            right_column=right_column,
+            join_type=join_type,
+        )
+        
+        self.current_query.join_transformations.append(join_transform)
+        
+        logger.debug(
+            "Recorded join transformation: %s.%s %s JOIN %s.%s",
+            left_table, left_column, join_type, right_table, right_column
+        )
     
     def get_history(self) -> List[QueryProvenance]:
         """
