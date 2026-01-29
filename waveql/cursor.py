@@ -1189,6 +1189,18 @@ class WaveQLCursor:
                                         source_col = t2_col
                                         target_col = t1_col
                                     
+                                    # Record join transformation for How-Provenance
+                                    if t1_name and t2_name:
+                                        tracker = get_provenance_tracker()
+                                        if tracker.enabled:
+                                            tracker.record_join_transformation(
+                                                left_table=t1_name,
+                                                right_table=t2_name,
+                                                left_column=t1_col,
+                                                right_column=t2_col,
+                                                join_type=join.get("type", "INNER"),
+                                            )
+                                    
                                     if target:
                                         # Extract unique values from current data
                                         try:

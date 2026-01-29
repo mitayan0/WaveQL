@@ -19,6 +19,47 @@ import uuid
 
 
 @dataclass
+class JoinTransformation:
+    """
+    Records a join operation for How-Provenance.
+    
+    This captures how data from multiple tables was combined during query
+    execution, including the join type and the columns used.
+    
+    Attributes:
+        left_table: Fully qualified name of the left table
+        right_table: Fully qualified name of the right table
+        left_column: Column from the left table used in join condition
+        right_column: Column from the right table used in join condition
+        join_type: Type of join (INNER, LEFT, RIGHT, FULL, CROSS)
+        timestamp: When the join was executed
+    """
+    left_table: str
+    right_table: str
+    left_column: str
+    right_column: str
+    join_type: str = "INNER"
+    timestamp: datetime = field(default_factory=datetime.utcnow)
+    
+    def __repr__(self) -> str:
+        return (
+            f"JoinTransformation({self.left_table}.{self.left_column} "
+            f"{self.join_type} JOIN {self.right_table}.{self.right_column})"
+        )
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "left_table": self.left_table,
+            "right_table": self.right_table,
+            "left_column": self.left_column,
+            "right_column": self.right_column,
+            "join_type": self.join_type,
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+        }
+
+
+@dataclass
 class APICallTrace:
     """
     Represents a single API call made during query execution.
@@ -147,6 +188,7 @@ class QueryProvenance:
         execution_end: When query execution completed
         api_calls: All API calls made during execution
         row_provenance: Per-row provenance (only in full/sampled mode)
+        join_transformations: How-Provenance - join operations performed
         total_rows: Number of rows in the final result
         adapters_used: List of adapter names accessed
         tables_accessed: List of fully-qualified table names accessed
@@ -175,6 +217,9 @@ class QueryProvenance:
     # Row-level provenance (only in full/sampled mode)
     row_provenance: List[RowProvenance] = field(default_factory=list)
     
+    # How-Provenance: Join transformations performed
+    join_transformations: List[JoinTransformation] = field(default_factory=list)
+    
     # Summary statistics
     total_rows: int = 0
     adapters_used: List[str] = field(default_factory=list)
@@ -193,6 +238,7 @@ class QueryProvenance:
             f"QueryProvenance(id={self.query_id[:8]}..., "
             f"adapters={self.adapters_used}, "
             f"api_calls={self.total_api_calls}, "
+            f"joins={len(self.join_transformations)}, "
             f"latency={self.total_latency_ms:.1f}ms)"
         )
     
@@ -215,6 +261,7 @@ class QueryProvenance:
                 }
                 for call in self.api_calls
             ],
+            "join_transformations": [jt.to_dict() for jt in self.join_transformations],
             "adapters_used": self.adapters_used,
             "tables_accessed": self.tables_accessed,
             "total_api_calls": self.total_api_calls,
