@@ -653,14 +653,19 @@ class BaseAdapter(ABC):
                 column = table.column(col)
                 
                 # Use PyArrow compute for efficiency
+                # Handle None results from empty arrays
                 if func == "SUM":
-                    result_data[alias] = [pc.sum(column).as_py()]
+                    val = pc.sum(column).as_py()
+                    result_data[alias] = [val if val is not None else 0]
                 elif func == "AVG":
-                    result_data[alias] = [pc.mean(column).as_py()]
+                    val = pc.mean(column).as_py()
+                    result_data[alias] = [val if val is not None else None]
                 elif func == "MIN":
-                    result_data[alias] = [pc.min(column).as_py()]
+                    val = pc.min(column).as_py()
+                    result_data[alias] = [val]
                 elif func == "MAX":
-                    result_data[alias] = [pc.max(column).as_py()]
+                    val = pc.max(column).as_py()
+                    result_data[alias] = [val]
         
         return pa.table(result_data)
     

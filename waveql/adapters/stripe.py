@@ -248,14 +248,33 @@ class StripeAdapter(BaseAdapter):
         except Exception as e:
             raise AdapterError(f"Stripe list failed: {e}")
 
-    def fetch(self, *args, **kwargs) -> pa.Table:
+    def fetch(
+        self,
+        table: str,
+        columns: List[str] = None,
+        predicates: List["Predicate"] = None,
+        limit: int = None,
+        offset: int = None,
+        order_by: List[tuple] = None,
+        group_by: List[str] = None,
+        aggregates: List[Any] = None,
+    ) -> pa.Table:
         """
         Synchronous fetch using sync httpx directly.
         
         Note: Uses sync httpx here instead of anyio.run() because
         async DNS resolution fails on some Windows configurations.
         """
-        return self._fetch_sync(*args, **kwargs)
+        return self._fetch_sync(
+            table=table,
+            columns=columns,
+            predicates=predicates,
+            limit=limit,
+            offset=offset,
+            order_by=order_by,
+            group_by=group_by,
+            aggregates=aggregates,
+        )
     
     def _fetch_sync(
         self,
@@ -329,6 +348,30 @@ class StripeAdapter(BaseAdapter):
                     results = []  # Reset for retry
                 else:
                     raise AdapterError(f"Stripe fetch failed after {max_retries} attempts: {e}")
+            except httpx.NetworkError as e:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(f"Stripe network error (attempt {attempt + 1}/{max_retries}), retrying in {delay}s: {e}")
+                    time.sleep(delay)
+                    results = []  # Reset for retry
+                else:
+                    raise AdapterError(f"Stripe fetch failed after {max_retries} attempts: {e}")
+            except httpx.ReadError as e:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(f"Stripe read error (attempt {attempt + 1}/{max_retries}), retrying in {delay}s: {e}")
+                    time.sleep(delay)
+                    results = []  # Reset for retry
+                else:
+                    raise AdapterError(f"Stripe fetch failed after {max_retries} attempts: {e}")
+            except httpx.TimeoutException as e:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(f"Stripe timeout (attempt {attempt + 1}/{max_retries}), retrying in {delay}s: {e}")
+                    time.sleep(delay)
+                    results = []  # Reset for retry
+                else:
+                    raise AdapterError(f"Stripe fetch timed out after {max_retries} attempts: {e}")
             except Exception as e:
                 if isinstance(e, AdapterError):
                     raise

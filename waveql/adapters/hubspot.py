@@ -202,14 +202,33 @@ class HubSpotAdapter(BaseAdapter):
         except Exception as e:
             raise AdapterError(f"HubSpot count failed: {e}")
 
-    def fetch(self, *args, **kwargs) -> pa.Table:
+    def fetch(
+        self,
+        table: str,
+        columns: List[str] = None,
+        predicates: List["Predicate"] = None,
+        limit: int = None,
+        offset: int = None,
+        order_by: List[tuple] = None,
+        group_by: List[str] = None,
+        aggregates: List[Any] = None,
+    ) -> pa.Table:
         """
         Synchronous fetch that uses sync httpx directly.
         
         Note: We use sync httpx here instead of anyio.run() because
         async DNS resolution fails on some Windows configurations.
         """
-        return self._fetch_sync(*args, **kwargs)
+        return self._fetch_sync(
+            table=table,
+            columns=columns,
+            predicates=predicates,
+            limit=limit,
+            offset=offset,
+            order_by=order_by,
+            group_by=group_by,
+            aggregates=aggregates,
+        )
     
     def _fetch_sync(
         self,
@@ -422,22 +441,15 @@ class HubSpotAdapter(BaseAdapter):
         """Update records in HubSpot (requires ID)."""
         object_type = self._get_object_type(table)
         
-        # HubSpot update requires an ID. If predicates contain ID, we use it.
-        object_id = None
-        if predicates:
-            for pred in predicates:
-                if pred.column.lower() == "id" and pred.operator == "=":
-                    object_id = pred.value
-                    break
-        
-        if not object_id:
-            raise QueryError("HubSpot update requires 'id' in WHERE clause (e.g., WHERE id = '123')")
+        object_id = self._extract_id_from_predicates(predicates, "HubSpot update")
             
         url = f"https://{self._host}/crm/v3/objects/{object_type}/{object_id}"
         payload = {"properties": values}
         try:
             await self._request_async("PATCH", url, json=payload)
             return 1
+        except QueryError:
+            raise
         except Exception as e:
             raise QueryError(f"HubSpot update failed: {e}")
 
@@ -445,20 +457,14 @@ class HubSpotAdapter(BaseAdapter):
         """Delete records in HubSpot (requires ID)."""
         object_type = self._get_object_type(table)
         
-        object_id = None
-        if predicates:
-            for pred in predicates:
-                if pred.column.lower() == "id" and pred.operator == "=":
-                    object_id = pred.value
-                    break
-        
-        if not object_id:
-            raise QueryError("HubSpot delete requires 'id' in WHERE clause")
+        object_id = self._extract_id_from_predicates(predicates, "HubSpot delete")
             
         url = f"https://{self._host}/crm/v3/objects/{object_type}/{object_id}"
         try:
             await self._request_async("DELETE", url)
             return 1
+        except QueryError:
+            raise
         except Exception as e:
             raise QueryError(f"HubSpot delete failed: {e}")
 
@@ -466,12 +472,11 @@ class HubSpotAdapter(BaseAdapter):
         """
         Internal helper for async requests with auth and retry logic.
         
-        Uses sync httpx.Client wrapped in anyio.to_thread.run_sync() with
-        retry logic for transient network/DNS failures.
+        Uses httpx.AsyncClient for true async I/O with retry logic for
+        transient network/DNS failures.
         """
         import httpx
-        import anyio
-        import time
+        import asyncio
         
         headers = kwargs.pop("headers", {})
         if self._access_token:
@@ -480,37 +485,43 @@ class HubSpotAdapter(BaseAdapter):
         max_retries = 5
         base_delay = 1.0  # seconds - longer delay for DNS stability
         
-        def sync_request():
-            last_error = None
-            for attempt in range(max_retries):
-                try:
-                    with httpx.Client(timeout=30.0) as client:
-                        response = client.request(method, url, headers=headers, **kwargs)
-                        if response.status_code >= 400:
-                            try:
-                                error_data = response.json()
-                                message = error_data.get("message", response.text)
-                            except:
-                                message = response.text
-                            raise AdapterError(f"HubSpot API error ({response.status_code}): {message}")
-                        return response
-                except httpx.ConnectError as e:
-                    last_error = e
-                    if attempt < max_retries - 1:
-                        delay = base_delay * (2 ** attempt)
-                        logger.warning(f"HubSpot request failed (attempt {attempt + 1}/{max_retries}), retrying in {delay}s: {e}")
-                        time.sleep(delay)
-                    else:
-                        raise
-                except httpx.TimeoutException as e:
-                    last_error = e
-                    if attempt < max_retries - 1:
-                        delay = base_delay * (2 ** attempt)
-                        logger.warning(f"HubSpot request timed out (attempt {attempt + 1}/{max_retries}), retrying in {delay}s: {e}")
-                        time.sleep(delay)
-                    else:
-                        raise AdapterError(f"HubSpot request timed out after {max_retries} attempts: {e}")
-            raise last_error  # Should not reach here
-        
-        # Run sync request in thread to avoid blocking event loop
-        return await anyio.to_thread.run_sync(sync_request)
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.request(method, url, headers=headers, **kwargs)
+                    if response.status_code >= 400:
+                        try:
+                            error_data = response.json()
+                            message = error_data.get("message", response.text)
+                        except:
+                            message = response.text
+                        raise AdapterError(f"HubSpot API error ({response.status_code}): {message}")
+                    return response
+            except httpx.ConnectError as e:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(f"HubSpot request failed (attempt {attempt + 1}/{max_retries}), retrying in {delay}s: {e}")
+                    await asyncio.sleep(delay)
+                else:
+                    raise AdapterError(f"HubSpot request failed after {max_retries} attempts: {e}")
+            except httpx.NetworkError as e:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(f"HubSpot network error (attempt {attempt + 1}/{max_retries}), retrying in {delay}s: {e}")
+                    await asyncio.sleep(delay)
+                else:
+                    raise AdapterError(f"HubSpot request failed after {max_retries} attempts: {e}")
+            except httpx.ReadError as e:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(f"HubSpot read error (attempt {attempt + 1}/{max_retries}), retrying in {delay}s: {e}")
+                    await asyncio.sleep(delay)
+                else:
+                    raise AdapterError(f"HubSpot request failed after {max_retries} attempts: {e}")
+            except httpx.TimeoutException as e:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(f"HubSpot request timed out (attempt {attempt + 1}/{max_retries}), retrying in {delay}s: {e}")
+                    await asyncio.sleep(delay)
+                else:
+                    raise AdapterError(f"HubSpot request timed out after {max_retries} attempts: {e}")

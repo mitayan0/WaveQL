@@ -1,11 +1,29 @@
 # Changelog
 
-## [0.1.8] - 2026-01-26
+## [0.1.8] - 2026-01-29
 
 ### Fixed
 - **Optimizer Integration**: Integrated `QueryOptimizer` with `WaveQLCursor` to unify predicate logic.
 - **Safety Net**: Added client-side filtering fallback (`_apply_residual_filter`) for non-pushable predicates.
 - **Correctness**: Fixed complex boolean logic handling (e.g., OR conditions) to prevent data loss.
+
+### Improved
+- **REST Adapter**:
+  - Moved `import re` to module level for better performance
+  - Added `list_tables()` method for endpoint introspection
+  - Added client-side `ORDER BY` support
+  - Added comprehensive endpoint configuration documentation
+- **Stripe Adapter**: Enhanced retry logic to handle `NetworkError`, `ReadError`, and `TimeoutException`
+- **Shopify Adapter**: Refactored to use base class `_extract_id_from_predicates()` for consistency
+- **HubSpot Adapter**:
+  - Converted to native async I/O using `httpx.AsyncClient` (was sync client in thread pool)
+  - Added retry handling for all transient errors (`ConnectError`, `NetworkError`, `ReadError`, `TimeoutException`)
+  - Refactored to use base class `_extract_id_from_predicates()` for consistency
+- **Base Adapter**: Fixed `_streaming_aggregate()` to handle `None` values from empty arrays (SUM returns 0 instead of None)
+
+### Documentation
+- Updated `docs/adapters.md` with RESTAdapter configuration options and HubSpot async examples
+- Updated `docs/error-handling.md` with retry behavior matrix for all adapters
 
 ## [0.1.7] - 2026-01-11
 

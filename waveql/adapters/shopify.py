@@ -202,14 +202,33 @@ class ShopifyAdapter(BaseAdapter):
         except Exception as e:
             raise AdapterError(f"Shopify count failed: {e}")
 
-    def fetch(self, *args, **kwargs) -> pa.Table:
+    def fetch(
+        self,
+        table: str,
+        columns: List[str] = None,
+        predicates: List["Predicate"] = None,
+        limit: int = None,
+        offset: int = None,
+        order_by: List[tuple] = None,
+        group_by: List[str] = None,
+        aggregates: List[Any] = None,
+    ) -> pa.Table:
         """
         Synchronous fetch using sync httpx directly.
         
         Note: Uses sync httpx here instead of anyio.run() because
         async DNS resolution fails on some Windows configurations.
         """
-        return self._fetch_sync(*args, **kwargs)
+        return self._fetch_sync(
+            table=table,
+            columns=columns,
+            predicates=predicates,
+            limit=limit,
+            offset=offset,
+            order_by=order_by,
+            group_by=group_by,
+            aggregates=aggregates,
+        )
     
     def _fetch_sync(
         self,
@@ -422,6 +441,8 @@ class ShopifyAdapter(BaseAdapter):
         try:
             await self._request_async("PUT", url, json=payload)
             return 1
+        except QueryError:
+            raise
         except Exception as e:
             raise QueryError(f"Shopify update failed: {e}")
 
@@ -433,6 +454,8 @@ class ShopifyAdapter(BaseAdapter):
         try:
             await self._request_async("DELETE", url)
             return 1
+        except QueryError:
+            raise
         except Exception as e:
             raise QueryError(f"Shopify delete failed: {e}")
 
