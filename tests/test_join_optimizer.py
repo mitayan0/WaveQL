@@ -11,14 +11,11 @@ These tests verify:
 
 import pytest
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 import pyarrow as pa
 
 from waveql.join_optimizer import (
-    JoinOptimizer, 
     TableStats, 
-    JoinEdge, 
-    JoinPlan,
     get_join_optimizer
 )
 from waveql.query_planner import Predicate

@@ -15,8 +15,8 @@ from __future__ import annotations
 import os
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
-from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from dataclasses import dataclass
 from enum import Enum
 
 import duckdb
@@ -32,7 +32,7 @@ except ImportError:
     boto3 = None
 
 from waveql.adapters.base import BaseAdapter
-from waveql.exceptions import AdapterError, QueryError, ConfigurationError
+from waveql.exceptions import AdapterError
 from waveql.schema_cache import ColumnInfo
 
 if TYPE_CHECKING:

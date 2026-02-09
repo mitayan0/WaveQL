@@ -34,7 +34,6 @@ Architecture:
 
 from __future__ import annotations
 import asyncio
-import hashlib
 import logging
 import os
 import random
@@ -45,15 +44,12 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 import pyarrow as pa
 
 from waveql.pg_wire.protocol import (
-    MessageType,
     FrontendMessageType,
-    AuthType,
     FormatCode,
     TransactionStatus,
     ColumnDescription,
     MessageReader,
     ProtocolError,
-    StartupMessage,
     parse_startup_message,
     build_authentication_ok,
     build_authentication_md5,
@@ -74,7 +70,6 @@ from waveql.pg_wire.catalog import PGCatalogEmulator
 from waveql.pg_wire.type_mapping import (
     arrow_to_pg_oid,
     encode_text_value,
-    PG_TYPES,
 )
 
 if TYPE_CHECKING:
@@ -273,7 +268,7 @@ class PGWireSession:
             elif len(result) == 0:
                 # Empty result
                 await self._send_result_set(result)
-                await self._send(build_command_complete(f"SELECT 0"))
+                await self._send(build_command_complete("SELECT 0"))
             else:
                 # Send result set
                 await self._send_result_set(result)
@@ -454,7 +449,7 @@ class PGWireSession:
         
         # Read format codes
         num_format_codes = reader.read_int16()
-        format_codes = [reader.read_int16() for _ in range(num_format_codes)]
+        [reader.read_int16() for _ in range(num_format_codes)]
         
         # Read parameter values
         num_params = reader.read_int16()
@@ -512,7 +507,7 @@ class PGWireSession:
         """Handle Execute message (execute a portal)."""
         reader = MessageReader(payload)
         portal_name = reader.read_string()
-        max_rows = reader.read_int32()  # 0 = no limit
+        reader.read_int32()  # 0 = no limit
         
         portal = self._portals.get(portal_name)
         if not portal:

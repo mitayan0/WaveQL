@@ -1,7 +1,6 @@
 
 import pytest
 import respx
-import httpx
 from httpx import Response
 import pyarrow as pa
 from unittest.mock import MagicMock, patch

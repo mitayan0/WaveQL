@@ -5,13 +5,11 @@ Tests for CDC State Backend (Persistence Layer)
 import os
 import tempfile
 from datetime import datetime
-from pathlib import Path
 
 import pytest
 
 from waveql.cdc.state import (
     StreamPosition,
-    StateBackend,
     MemoryStateBackend,
     SQLiteStateBackend,
     create_state_backend,

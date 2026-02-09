@@ -4,10 +4,8 @@ Salesforce Adapter - Query Salesforce using SOQL via REST API
 
 from __future__ import annotations
 import logging
-import urllib.parse
 from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 import requests
-import httpx
 import pyarrow as pa
 
 from waveql.adapters.base import BaseAdapter

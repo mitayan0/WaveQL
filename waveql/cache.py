@@ -27,7 +27,7 @@ from collections import OrderedDict
 import pyarrow as pa
 
 if TYPE_CHECKING:
-    from waveql.query_planner import Predicate
+    pass
 
 logger = logging.getLogger(__name__)
 

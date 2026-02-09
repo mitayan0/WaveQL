@@ -10,8 +10,7 @@ Tests cover:
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
-from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import Mock
 import pyarrow as pa
 
 from waveql.chunked_executor import (
@@ -20,7 +19,6 @@ from waveql.chunked_executor import (
     ChunkResult,
     get_optimal_chunk_size,
     DEFAULT_CHUNK_SIZES,
-    MAX_ESTIMATED_URL_LENGTH,
 )
 from waveql.query_planner import Predicate
 

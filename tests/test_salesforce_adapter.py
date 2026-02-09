@@ -4,10 +4,9 @@ Tests for Salesforce Adapter
 
 import pytest
 import responses
-import pyarrow as pa
 from waveql.adapters.salesforce import SalesforceAdapter
 from waveql.query_planner import Predicate
-from waveql.exceptions import AdapterError, QueryError
+from waveql.exceptions import AdapterError
 
 MOCK_ACCOUNTS = [
     {

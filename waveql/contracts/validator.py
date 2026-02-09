@@ -7,13 +7,12 @@ with detailed error reporting and optional strict/lenient modes.
 
 from __future__ import annotations
 import logging
-from typing import Any, Dict, List, Optional, Set
+from typing import List
 
 import pyarrow as pa
 
 from waveql.contracts.models import (
     DataContract,
-    ColumnContract,
     ContractValidationResult,
     ContractViolation,
     ViolationType,

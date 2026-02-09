@@ -15,11 +15,10 @@ Features:
 
 from __future__ import annotations
 import logging
-import math
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, List, Optional, TYPE_CHECKING
 
 import pyarrow as pa
 
@@ -231,7 +230,6 @@ class ChunkedExecutor:
         
         # Find IN predicates that need chunking
         in_predicate = None
-        in_predicate_idx = None
         other_predicates = []
         
         for i, pred in enumerate(predicates):
@@ -241,13 +239,11 @@ class ChunkedExecutor:
                 # Take the first large IN predicate for chunking
                 if in_predicate is None:
                     in_predicate = pred
-                    in_predicate_idx = i
                 else:
                     # Multiple large IN predicates - keep the larger one
                     if len(pred.value) > len(in_predicate.value):
                         other_predicates.append(in_predicate)
                         in_predicate = pred
-                        in_predicate_idx = i
                     else:
                         other_predicates.append(pred)
             else:

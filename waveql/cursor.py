@@ -16,8 +16,6 @@ from waveql.optimizer import QueryOptimizer, CompoundPredicate, PredicateType
 from waveql.observability import QueryPlan
 from waveql.resource_optimizer import (
     get_budget_planner,
-    get_cardinality_estimator,
-    get_adaptive_pagination,
     get_resource_executor,
 )
 from waveql.provenance.tracker import get_provenance_tracker
@@ -303,7 +301,6 @@ class WaveQLCursor:
         Returns:
             Modified query_info with policy predicates injected
         """
-        from waveql.query_planner import Predicate
         
         if not query_info.table:
             return query_info
@@ -372,7 +369,7 @@ class WaveQLCursor:
             
             if where:
                 predicates.extend(self._extract_predicates_from_expression(where.this))
-        except Exception as e:
+        except Exception:
             # If parsing fails, create a RAW predicate for SQL-level injection
             logger.debug("RLS: Complex predicate, using RAW: %s", predicate_sql)
             predicates.append(Predicate(
@@ -556,7 +553,6 @@ class WaveQLCursor:
             - residual_predicates: List[CompoundPredicate] to filter client-side
             - has_residual: bool indicating if client-side filtering is needed
         """
-        from waveql.query_planner import Predicate
         import sqlglot
         from sqlglot import exp
         
@@ -1156,7 +1152,8 @@ class WaveQLCursor:
                     # If T1 is current table, and T2 is not fetched, push condition to T2.
                     if data and len(data) > 0 and len(data) < 100000: # Limit pushdown for massive results
                         for join in query_info.joins:
-                            if not join.get("on"): continue
+                            if not join.get("on"):
+                                continue
                             
                             # Join involves which tables?
                             # We need to parse the predicates in 'on'
@@ -1166,7 +1163,8 @@ class WaveQLCursor:
                                     # We expect format like "alias1.col"
                                     # Simple parsing:
                                     left, right = on_pred.column, on_pred.value
-                                    if not isinstance(right, str): continue # Value must be a column reference string
+                                    if not isinstance(right, str):
+                                        continue  # Value must be a column reference string
                                     
                                     # Resolve tables for left and right
                                     t1_alias, t1_col = left.split(".", 1) if "." in left else (None, left)
@@ -1347,7 +1345,6 @@ class WaveQLCursor:
         
         # Rewrite query to use shadow view instead of the official one
         # Use regex to replace table reference safely
-        import re
         rewrite_regex = r'\b' + re.escape(clean_name) + r'\b'
         shadow_sql = re.sub(rewrite_regex, f'"{shadow_view}"', operation, flags=re.IGNORECASE)
         
@@ -1543,7 +1540,7 @@ class WaveQLCursor:
         """
         from waveql.streaming import StreamConfig
         
-        config = StreamConfig(
+        StreamConfig(
             batch_size=batch_size,
             compression=compression,
             progress_callback=progress_callback,

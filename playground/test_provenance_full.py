@@ -152,7 +152,7 @@ def test_provenance_servicenow():
     # Verify API call details
     if prov.api_calls:
         call = prov.api_calls[0]
-        print(f"\n  API Call Details:")
+        print("\n  API Call Details:")
         print(f"    Adapter: {call.adapter_name}")
         print(f"    Table: {call.table_name}")
         print(f"    Rows: {call.rows_returned}")
@@ -391,7 +391,7 @@ def test_provenance_hubspot():
     # Verify API call details
     if prov.api_calls:
         call = prov.api_calls[0]
-        print(f"\n  API Call Details:")
+        print("\n  API Call Details:")
         print(f"    Adapter: {call.adapter_name}")
         print(f"    Table: {call.table_name}")
         print(f"    Rows: {call.rows_returned}")
@@ -505,7 +505,7 @@ def test_provenance_serialization():
     import json
     prov_dict = prov.to_dict()
     
-    print(f"  Serializing provenance to JSON...")
+    print("  Serializing provenance to JSON...")
     json_str = json.dumps(prov_dict, indent=2, default=str)
     print(f"  JSON size: {len(json_str)} bytes")
     

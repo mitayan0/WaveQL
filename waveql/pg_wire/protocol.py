@@ -15,7 +15,7 @@ from __future__ import annotations
 import struct
 from enum import IntEnum
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 
 class MessageType(IntEnum):

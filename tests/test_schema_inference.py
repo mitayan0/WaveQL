@@ -183,9 +183,9 @@ class TestRecordsToArrowTable:
         # Verify struct values
         user_data = user_col.to_pylist()
         assert user_data[0]["name"] == "Alice"
-        assert user_data[0]["active"] == True
+        assert user_data[0]["active"]
         assert user_data[1]["name"] == "Bob"
-        assert user_data[1]["active"] == False
+        assert not user_data[1]["active"]
     
     def test_empty_records(self):
         table = records_to_arrow_table([])

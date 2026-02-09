@@ -6,8 +6,7 @@ This covers the 45% uncovered module waveql/adapters/hubspot.py
 
 import pytest
 import pyarrow as pa
-from unittest.mock import MagicMock, patch, AsyncMock
-from datetime import datetime
+from unittest.mock import MagicMock, patch
 
 from waveql.adapters.hubspot import HubSpotAdapter
 from waveql.query_planner import Predicate
@@ -595,7 +594,7 @@ class TestHubSpotAdapterCountOptimization:
         agg.column = "*"
         
         result = adapter._is_simple_count([agg], None)
-        assert result == True
+        assert result
     
     def test_is_simple_count_with_group_by(self):
         """Test that COUNT with GROUP BY is not simple."""
@@ -606,7 +605,7 @@ class TestHubSpotAdapterCountOptimization:
         agg.column = "*"
         
         result = adapter._is_simple_count([agg], ["category"])
-        assert result == False
+        assert not result
     
     def test_is_simple_count_multiple_aggs(self):
         """Test that multiple aggregates is not simple count."""
@@ -621,7 +620,7 @@ class TestHubSpotAdapterCountOptimization:
         agg2.column = "amount"
         
         result = adapter._is_simple_count([agg1, agg2], None)
-        assert result == False
+        assert not result
 
 
 class TestHubSpotAdapterObjectTypes:

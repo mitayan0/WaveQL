@@ -41,7 +41,7 @@ def main():
 
     sf_host = SF_HOST.replace('https://', '').replace('http://', '')
     # For some orgs might need test.salesforce.com, but usually login works
-    token_url = f"https://login.salesforce.com/services/oauth2/token"
+    token_url = "https://login.salesforce.com/services/oauth2/token"
     
     print(f"Connecting to {SF_HOST}...")
     try:

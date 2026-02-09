@@ -2,10 +2,8 @@
 import pytest
 import respx
 from httpx import Response
-import pyarrow as pa
 from waveql.adapters.salesforce import SalesforceAdapter
 from waveql.query_planner import Predicate
-from waveql.exceptions import AdapterError, QueryError, RateLimitError
 
 MOCK_DESCRIBE_ACCOUNT = {
     "name": "Account",

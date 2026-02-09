@@ -3,8 +3,6 @@ import sqlalchemy
 from sqlalchemy import create_engine, inspect
 import respx
 import httpx
-import pytest
-import pyarrow as pa
 import pandas as pd
 import re
 

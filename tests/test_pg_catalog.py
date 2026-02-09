@@ -6,7 +6,7 @@ This covers the 48% uncovered module waveql/pg_wire/catalog.py
 
 import pytest
 import pyarrow as pa
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock
 
 from waveql.pg_wire.catalog import PGCatalogEmulator
 

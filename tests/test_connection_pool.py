@@ -1,14 +1,11 @@
 
 import pytest
 import time
-import threading
-from unittest.mock import MagicMock, patch, Mock
-import requests
-import httpx
+from unittest.mock import MagicMock, patch
 
 from waveql.utils.connection_pool import (
     PoolConfig, PooledConnection, SyncConnectionPool, AsyncConnectionPool,
-    get_sync_pool, get_async_pool, configure_pools, close_all_pools
+    get_sync_pool, configure_pools, close_all_pools
 )
 
 # Ensure pools are reset before and after tests

@@ -11,7 +11,6 @@ This example shows how WaveQL now handles complex WHERE clauses
 that were previously not pushable to APIs.
 """
 
-import waveql
 from waveql.query_planner import QueryPlanner
 from waveql.optimizer import QueryOptimizer, SubqueryPushdownOptimizer
 
@@ -68,7 +67,6 @@ def demo_servicenow_filter_generation():
     print()
     
     from waveql.optimizer import CompoundPredicate, PredicateType
-    from waveql.query_planner import Predicate
     
     # Create an IN predicate
     in_pred = CompoundPredicate(
@@ -91,7 +89,7 @@ def demo_subquery_analysis():
     print("=" * 60)
     print()
     
-    from waveql.optimizer import SubqueryInfo, SubqueryPushdownOptimizer
+    from waveql.optimizer import SubqueryInfo
     from waveql.query_planner import QueryInfo, Predicate
     
     optimizer = SubqueryPushdownOptimizer()

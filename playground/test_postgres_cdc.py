@@ -35,7 +35,6 @@ import os
 import sys
 import asyncio
 import time
-from datetime import datetime
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -135,9 +134,9 @@ def check_prerequisites():
         """)
         has_replication = cur.fetchone()[0]
         if has_replication:
-            print_success(f"User has REPLICATION privilege")
+            print_success("User has REPLICATION privilege")
         else:
-            print_error(f"User lacks REPLICATION privilege")
+            print_error("User lacks REPLICATION privilege")
             print_info(f"Fix: ALTER USER {POSTGRES_CONFIG['user']} WITH REPLICATION;")
             return False
         
@@ -150,10 +149,10 @@ def check_prerequisites():
                     )
                 """)
                 cur.execute("SELECT pg_drop_replication_slot('waveql_check_slot')")
-                print_success(f"wal2json plugin available")
+                print_success("wal2json plugin available")
             except psycopg2.Error as e:
                 if "could not access file" in str(e) or "not found" in str(e).lower():
-                    print_error(f"wal2json plugin not installed")
+                    print_error("wal2json plugin not installed")
                     print_info("Fix: Install wal2json or use test_decoding instead")
                     print_info("     Set OUTPUT_PLUGIN = 'test_decoding' in this script")
                     return False
@@ -163,7 +162,7 @@ def check_prerequisites():
                         cur.execute("SELECT pg_drop_replication_slot('waveql_check_slot')")
                     except:
                         pass
-                    print_success(f"wal2json plugin available")
+                    print_success("wal2json plugin available")
         
         cur.close()
         conn.close()
@@ -186,7 +185,7 @@ def setup_test_table():
     
     # Drop existing table
     cur.execute(f"DROP TABLE IF EXISTS {TEST_TABLE} CASCADE")
-    print_info(f"Dropped existing table (if any)")
+    print_info("Dropped existing table (if any)")
     
     # Create new test table
     cur.execute(f"""
@@ -203,7 +202,7 @@ def setup_test_table():
     
     # Set REPLICA IDENTITY to FULL for complete UPDATE/DELETE info
     cur.execute(f"ALTER TABLE {TEST_TABLE} REPLICA IDENTITY FULL")
-    print_success(f"Set REPLICA IDENTITY FULL (enables old data capture)")
+    print_success("Set REPLICA IDENTITY FULL (enables old data capture)")
     
     cur.close()
     conn.close()
@@ -268,7 +267,7 @@ def make_changes():
         SET status = 'verified', updated_at = CURRENT_TIMESTAMP
         WHERE name = 'Bob Johnson'
     """)
-    print_success(f"Updated Bob's status to 'verified'")
+    print_success("Updated Bob's status to 'verified'")
     time.sleep(0.5)
     
     # DELETE
@@ -277,7 +276,7 @@ def make_changes():
         DELETE FROM {TEST_TABLE}
         WHERE name = 'Charlie Brown'
     """)
-    print_success(f"Deleted Charlie's record")
+    print_success("Deleted Charlie's record")
     
     cur.close()
     conn.close()
@@ -495,7 +494,7 @@ async def test_slot_management():
     # Get slot info
     info = await provider.get_slot_info()
     if info:
-        print_success(f"Slot info retrieved:")
+        print_success("Slot info retrieved:")
         print(f"      Name: {info['slot_name']}")
         print(f"      Plugin: {info['plugin']}")
         print(f"      Active: {info['active']}")
@@ -521,7 +520,6 @@ async def test_slot_management():
 async def test_waveql_connection_api():
     """Test using CDC through WaveQL connection API."""
     import waveql
-    from waveql.cdc.postgres import PostgresCDCProvider
     
     print_header("Test 4: WaveQL Connection API")
     
@@ -547,7 +545,7 @@ async def test_waveql_connection_api():
     await provider._ensure_slot_exists()
     info = await provider.get_slot_info()
     if info:
-        print_success(f"Slot created successfully via WaveQL API")
+        print_success("Slot created successfully via WaveQL API")
         print_info(f"  Slot Name: {info['slot_name']}")
         print_info(f"  Plugin: {info['plugin']}")
         print_info(f"  Active: {info['active']}")

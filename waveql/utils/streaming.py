@@ -4,7 +4,7 @@ Parallel Streaming - High-throughput parallel data fetching with Arrow batches
 
 from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Callable, Iterator, List, Any, Dict
+from typing import Callable, Iterator, List, Dict
 import logging
 import pyarrow as pa
 

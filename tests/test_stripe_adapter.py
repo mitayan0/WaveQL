@@ -191,7 +191,7 @@ class TestStripeAdapterPagination:
                 api_key="sk_test_xxx",
             )
             
-            result = adapter.fetch("customers")
+            adapter.fetch("customers")
 
 
 class TestStripeAdapterErrorHandling:
@@ -307,7 +307,7 @@ class TestStripeAdapterExpand:
             )
             
             # Fetch with expanded customer
-            result = adapter.fetch("charges", columns=["id", "customer"])
+            adapter.fetch("charges", columns=["id", "customer"])
 
 
 class TestStripeAdapterCRUD:
@@ -449,7 +449,7 @@ class TestStripeAdapterCountOptimization:
         agg.column = "*"
         
         result = adapter._is_simple_count([agg], None)
-        assert result == True
+        assert result
     
     def test_is_simple_count_false_with_group_by(self):
         """Test COUNT with GROUP BY is not simple."""
@@ -460,7 +460,7 @@ class TestStripeAdapterCountOptimization:
         agg.column = "*"
         
         result = adapter._is_simple_count([agg], ["status"])
-        assert result == False
+        assert not result
     
     def test_is_simple_count_false_non_count(self):
         """Test non-COUNT aggregate is not simple count."""
@@ -471,7 +471,7 @@ class TestStripeAdapterCountOptimization:
         agg.column = "amount"
         
         result = adapter._is_simple_count([agg], None)
-        assert result == False
+        assert not result
 
 
 class TestStripeAdapterConnectionRetry:

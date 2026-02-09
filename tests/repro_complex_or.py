@@ -2,7 +2,7 @@
 import unittest
 from unittest.mock import MagicMock
 import pyarrow as pa
-from waveql.cursor import WaveQLCursor, QueryPlanner
+from waveql.cursor import WaveQLCursor
 from waveql.connection import WaveQLConnection
 from waveql.adapters.base import BaseAdapter
 

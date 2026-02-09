@@ -13,7 +13,6 @@ import respx
 import httpx
 import pyarrow as pa
 import logging
-from unittest.mock import MagicMock, patch
 from dataclasses import dataclass
 
 from waveql.adapters.base import BaseAdapter

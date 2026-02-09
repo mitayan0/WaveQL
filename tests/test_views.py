@@ -1,9 +1,6 @@
 """Tests for virtual views and registry."""
 
 import pytest
-import json
-import yaml
-from pathlib import Path
 from waveql.semantic.views import VirtualView, VirtualViewRegistry
 
 # --- VirtualView Tests ---
@@ -199,7 +196,7 @@ def test_registry_edge_cases(tmp_path):
     corrupt_file = tmp_path / "corrupt.yaml"
     corrupt_file.write_text("!!corrupt content", encoding="utf-8")
     # This should log warning and continue
-    reg3 = VirtualViewRegistry.from_directory(tmp_path)
+    VirtualViewRegistry.from_directory(tmp_path)
     # reg3 should still have views from other files in tmp_path (like test.weird if it matched, but it doesn't)
     # wait, test.weird doesn't match glob.
     # We should have a valid yaml too.

@@ -11,9 +11,8 @@ Usage:
 
 from __future__ import annotations
 import time
-import functools
 import logging
-from typing import List, Any, Callable, TYPE_CHECKING
+from typing import List, Any, TYPE_CHECKING
 
 from waveql.provenance.tracker import get_provenance_tracker
 from waveql.provenance.models import PredicateMatch
@@ -172,7 +171,7 @@ def traced_fetch(
         
         return result
         
-    except Exception as e:
+    except Exception:
         elapsed_ms = (time.perf_counter() - start_time) * 1000
         
         # Record failed API call

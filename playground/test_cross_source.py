@@ -63,7 +63,7 @@ def setup_local_data():
         f.write("3,24,12,Medium - P3 - Moderate Impact\n")
         f.write("4,48,24,Low - P4 - Minor Impact\n")
         f.write("5,72,48,Planning - P5 - No Impact\n")
-    print(f"  ✓ Created: sla_targets.csv")
+    print("  ✓ Created: sla_targets.csv")
     
     # Priority Cost Mapping (JSON)
     cost_path = DATA_DIR / "priority_costs.json"
@@ -75,7 +75,7 @@ def setup_local_data():
   {"priority": "4", "hourly_cost": 50, "breach_penalty": 500},
   {"priority": "5", "hourly_cost": 25, "breach_penalty": 250}
 ]""")
-    print(f"  ✓ Created: priority_costs.json")
+    print("  ✓ Created: priority_costs.json")
     
     # State Descriptions (CSV)
     states_path = DATA_DIR / "states.csv"
@@ -87,7 +87,7 @@ def setup_local_data():
         f.write("4,Resolved,false,Closed\n")
         f.write("5,Closed,false,Closed\n")
         f.write("6,Cancelled,false,Closed\n")
-    print(f"  ✓ Created: states.csv")
+    print("  ✓ Created: states.csv")
     
     print(f"\n  Data directory: {DATA_DIR}")
     return True
@@ -168,7 +168,7 @@ def test_sn_with_json_costs():
     priority_counts = sn_cursor.to_arrow()
     sn_conn.close()
     
-    print(f"  Fetched priority distribution from ServiceNow")
+    print("  Fetched priority distribution from ServiceNow")
     
     # Join with cost data
     db = duckdb.connect(":memory:")

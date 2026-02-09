@@ -6,7 +6,7 @@ Uses DuckDB's built-in file reading for optimal performance.
 
 from __future__ import annotations
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
+from typing import Any, Dict, List, Sequence, TYPE_CHECKING
 
 import duckdb
 import pyarrow as pa
@@ -15,7 +15,6 @@ import anyio
 from waveql.adapters.base import BaseAdapter
 from waveql.exceptions import AdapterError, QueryError
 from waveql.schema_cache import ColumnInfo
-from waveql.query_planner import ParameterPlaceholder
 
 if TYPE_CHECKING:
     from waveql.query_planner import Predicate
@@ -270,7 +269,7 @@ class FileAdapter(BaseAdapter):
     ) -> int:
         """Append to CSV file."""
         if self._file_type != "csv":
-            raise QueryError(f"INSERT only supported for CSV files")
+            raise QueryError("INSERT only supported for CSV files")
         
         file_path = self._resolve_path(table)
         
@@ -283,7 +282,7 @@ class FileAdapter(BaseAdapter):
                 # Check if parameters is 1D or 2D (batch)
                 # But executemany calls execute_batch, checking base adapter
                 # This insert is for single row mostly via execute
-                current_params = parameters
+                pass
                 
             param_idx = 0
             for col, val in values.items():

@@ -10,8 +10,7 @@ These tests cover:
 import pytest
 import time
 import threading
-from unittest.mock import MagicMock, patch
-import asyncio
+from unittest.mock import MagicMock
 
 import pyarrow as pa
 
@@ -72,8 +71,7 @@ class TestConnectionPoolHealthCheck:
     
     def test_health_check_returns_true_for_new_connection(self):
         """Test that a newly created connection is considered healthy."""
-        from waveql.utils.connection_pool import SyncConnectionPool, PoolConfig, PooledConnection
-        import requests
+        from waveql.utils.connection_pool import SyncConnectionPool, PoolConfig
         
         config = PoolConfig(max_idle_time=300)
         pool = SyncConnectionPool(config)
@@ -86,7 +84,7 @@ class TestConnectionPoolHealthCheck:
     
     def test_health_check_returns_false_for_stale_connection(self):
         """Test that a stale connection is considered unhealthy."""
-        from waveql.utils.connection_pool import SyncConnectionPool, PoolConfig, PooledConnection
+        from waveql.utils.connection_pool import SyncConnectionPool, PoolConfig
         
         config = PoolConfig(max_idle_time=10)  # 10 seconds
         pool = SyncConnectionPool(config)
@@ -140,7 +138,7 @@ class TestConnectionPoolThreadSafety:
         def worker(thread_id):
             try:
                 for _ in range(5):
-                    with pool.get_session("test.example.com") as session:
+                    with pool.get_session("test.example.com"):
                         # Simulate some work
                         time.sleep(0.01)
             except Exception as e:

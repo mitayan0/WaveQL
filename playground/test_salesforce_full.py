@@ -147,7 +147,7 @@ def test_order_by(cursor):
     """)
     
     rows = cursor.fetchall()
-    print(f"  Recent Accounts:")
+    print("  Recent Accounts:")
     for row in rows:
         print(f"    {row['Name']}: {row['CreatedDate']}")
     
@@ -478,7 +478,7 @@ def test_contracts(cursor, conn):
     
     # Validate a query result against the contract
     cursor.execute("SELECT Name, Type, Industry FROM Account LIMIT 5")
-    results = cursor.fetchall()
+    cursor.fetchall()
     
     # In a real app, you'd use contract.validate(results)
     print(f"  Contract '{contract.table}' defined with {len(contract.columns)} columns")
@@ -534,7 +534,7 @@ def test_crud_operations(cursor, conn):
         if not row:
             print(f"    ✓ Deleted: {account_id}")
         else:
-            print(f"    ⚠ Delete failed")
+            print("    ⚠ Delete failed")
         
         print("\n  ✓ All CRUD operations work")
         

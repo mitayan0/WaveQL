@@ -257,7 +257,7 @@ def test_crud_operations(cursor, conn):
     
     try:
         # Use lower-level insertion to capture the ID directly to avoid search delay issues
-        adapter = conn.get_adapter("default")
+        conn.get_adapter("default")
         
         # INSERT
         print("\n  [INSERT] Creating test ticket...")

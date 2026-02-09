@@ -11,7 +11,7 @@ Tests cover:
 
 import pytest
 import time
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
+from unittest.mock import Mock, AsyncMock
 import httpx
 
 from waveql.utils.rate_limiter import RateLimiter

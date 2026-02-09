@@ -232,7 +232,7 @@ class TestCDCIntegration:
     @pytest.mark.skip(reason="Requires live ServiceNow connection")
     async def test_servicenow_stream(self):
         import waveql
-        from datetime import datetime, timedelta
+        from datetime import datetime
         
         conn = waveql.connect(
             "servicenow://instance.service-now.com",

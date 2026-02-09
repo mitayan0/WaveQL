@@ -569,7 +569,6 @@ class BaseAdapter(ABC):
         Returns:
             Aggregated Arrow table
         """
-        import pyarrow.compute as pc
         import logging
         
         logger = logging.getLogger(__name__)

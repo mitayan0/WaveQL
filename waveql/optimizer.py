@@ -11,13 +11,12 @@ Features:
 from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 from enum import Enum
 
-import sqlglot
 from sqlglot import exp
 
-from waveql.query_planner import Predicate, QueryInfo, Aggregate
+from waveql.query_planner import Predicate, QueryInfo
 
 logger = logging.getLogger(__name__)
 

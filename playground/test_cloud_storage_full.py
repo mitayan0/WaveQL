@@ -21,12 +21,9 @@ Note: These emulators are completely isolated from real cloud services.
 import sys
 import os
 import socket
-import time
 from io import BytesIO
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Optional, Callable
-from contextlib import contextmanager
 
 # Configure stdout for UTF-8 to support emojis on Windows
 if sys.platform == "win32":
@@ -50,9 +47,6 @@ from waveql.adapters.cloud_storage import (
     CloudCredentials,
     CloudProvider,
     TableFormat,
-    s3_adapter,
-    gcs_adapter,
-    azure_adapter,
 )
 
 
@@ -378,7 +372,7 @@ class MinIOTests:
             
             # Test LIMIT with OFFSET
             result_offset = adapter.fetch("sample.parquet", limit=10, offset=5)
-            assert len(result_offset) == 10, f"Expected 10 rows with offset"
+            assert len(result_offset) == 10, "Expected 10 rows with offset"
             
             self.results.record("LIMIT/OFFSET", "PASSED")
         except Exception as e:
@@ -434,7 +428,7 @@ class MinIOTests:
             adapter = self.get_adapter(format="csv")
             result = adapter.fetch("sample.csv")
             
-            assert len(result) == 50, f"Expected 50 rows from CSV"
+            assert len(result) == 50, "Expected 50 rows from CSV"
             
             self.results.record("CSV Format", "PASSED")
         except Exception as e:
@@ -880,11 +874,11 @@ class CrossProviderTests:
             # but we can test the URI construction
             
             # Test S3 URI construction
-            uri = f"s3://my-bucket/prefix".rstrip("/")
+            uri = "s3://my-bucket/prefix".rstrip("/")
             assert uri == "s3://my-bucket/prefix"
             
             # Test GCS URI construction
-            uri = f"gs://my-bucket/prefix".rstrip("/")
+            uri = "gs://my-bucket/prefix".rstrip("/")
             assert uri == "gs://my-bucket/prefix"
             
             # Test Azure URI construction

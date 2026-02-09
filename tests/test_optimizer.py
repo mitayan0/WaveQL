@@ -5,7 +5,6 @@ import pyarrow as pa
 from waveql.cursor import WaveQLCursor
 from waveql.connection import WaveQLConnection
 from waveql.adapters.base import BaseAdapter
-from waveql.query_planner import Predicate
 
 class MockAdapter(BaseAdapter):
     def __init__(self, name, data):

@@ -6,10 +6,7 @@ This covers the 38% uncovered module waveql/adapters/file_adapter.py
 
 import pytest
 import pyarrow as pa
-import tempfile
-import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 from waveql.adapters.file_adapter import FileAdapter
 from waveql.query_planner import Predicate
@@ -393,7 +390,7 @@ class TestFileAdapterInsert:
         
         adapter = FileAdapter(host=str(csv_file))
         
-        result = adapter.insert(
+        adapter.insert(
             table="data.csv",
             values={"id": 2, "name": "Bob"},
         )
@@ -413,7 +410,7 @@ class TestFileAdapterInsert:
             
             adapter = FileAdapter(host=str(csv_file))
             
-            result = await adapter.insert_async(
+            await adapter.insert_async(
                 table="data.csv",
                 values={"id": 3, "name": "Charlie"},
             )

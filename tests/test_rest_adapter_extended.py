@@ -2,10 +2,9 @@
 import pytest
 import requests
 import json
-import logging
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 from waveql.adapters.rest_adapter import RESTAdapter
-from waveql.exceptions import AdapterError, QueryError, RateLimitError
+from waveql.exceptions import AdapterError, QueryError
 from waveql.query_planner import Predicate
 from waveql.schema_cache import ColumnInfo, SchemaCache
 
@@ -296,7 +295,7 @@ def test_fetch_safety_limit(adapter, mock_session):
     mock_session.get.return_value.json.return_value = [{"id": i} for i in range(100)]
     
     with patch("waveql.adapters.rest_adapter.logger") as mock_logger:
-        results = adapter.fetch("users")
+        adapter.fetch("users")
         
         # It fetches one batch of 100, then realizes 100 >= 5 and stops with warning
         mock_logger.warning.assert_called()

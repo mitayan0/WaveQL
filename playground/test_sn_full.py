@@ -47,7 +47,6 @@ def load_env():
 load_env()
 
 import waveql
-from waveql import CacheConfig
 
 # Configuration
 INSTANCE = os.getenv("SN_INSTANCE")
@@ -560,7 +559,7 @@ def test_contracts(cursor, conn):
     
     # Validate a query result against the contract
     cursor.execute("SELECT number, priority, short_description FROM incident LIMIT 5")
-    results = cursor.fetchall()
+    cursor.fetchall()
     
     # In a real app, you'd use contract.validate(results)
     # Here we just verify the validation logic is accessible
@@ -579,7 +578,7 @@ def test_cdc_basic(conn):
         since = datetime.now() - timedelta(hours=24)
         stream = conn.stream_changes("incident", since=since, poll_interval=60)
         print(f"  CDCStream created: {stream}")
-        print(f"  Stream configured for table 'incident'")
+        print("  Stream configured for table 'incident'")
         print("  ✓ CDC stream creation works")
         return True
     except Exception as e:

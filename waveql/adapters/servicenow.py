@@ -9,11 +9,9 @@ Features:
 """
 
 from __future__ import annotations
-import json
 import logging
 from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 
-import requests
 import httpx
 import pyarrow as pa
 
@@ -349,7 +347,7 @@ class ServiceNowAdapter(BaseAdapter):
             return pa.table({f.name: [] for f in fields})
         
         # Use new schema utility for proper struct conversion
-        from waveql.utils.schema import records_to_arrow_table, infer_schema_from_records
+        from waveql.utils.schema import records_to_arrow_table
         
         # Build schema from ColumnInfo (which now includes Arrow types)
         schema_fields = []

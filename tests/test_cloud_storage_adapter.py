@@ -6,9 +6,7 @@ This covers the 41% uncovered module waveql/adapters/cloud_storage.py
 
 import pytest
 import pyarrow as pa
-from unittest.mock import MagicMock, patch, AsyncMock
-from datetime import datetime
-import io
+from unittest.mock import MagicMock, patch
 
 from waveql.adapters.cloud_storage import CloudStorageAdapter
 from waveql.query_planner import Predicate

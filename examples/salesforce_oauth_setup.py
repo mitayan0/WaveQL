@@ -171,7 +171,7 @@ def main():
     
     # Generate PKCE
     code_verifier, code_challenge = generate_pkce()
-    print(f"\n  Generated PKCE code challenge")
+    print("\n  Generated PKCE code challenge")
     
     # Build authorization URL with PKCE
     auth_params = {
@@ -242,7 +242,7 @@ def main():
                 print("\n  [WARNING] No refresh token received.")
                 print("  Make sure 'refresh_token' scope is in your Connected App.")
         else:
-            print(f"\n  [ERROR] Token exchange failed:")
+            print("\n  [ERROR] Token exchange failed:")
             print(f"  {response.text}")
     else:
         print(f"\n  [ERROR] Authorization failed: {server.error}")

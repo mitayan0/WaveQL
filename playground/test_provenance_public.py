@@ -10,7 +10,6 @@ This demonstrates that provenance tracking works correctly without
 the complexity of API keys or network authentication issues.
 """
 
-import os
 import sys
 from pathlib import Path
 from datetime import datetime
@@ -92,7 +91,7 @@ class JSONPlaceholderAdapter(BaseAdapter):
                     
                     return pa.Table.from_pylist(data) if data else pa.table({})
                     
-            except httpx.ConnectError as e:
+            except httpx.ConnectError:
                 if attempt < max_retries - 1:
                     time.sleep(1.0 * (2 ** attempt))
                 else:
@@ -263,7 +262,7 @@ def test_provenance_serialization():
     import json
     prov_dict = prov.to_dict()
     
-    print(f"  Serializing provenance to JSON...")
+    print("  Serializing provenance to JSON...")
     json_str = json.dumps(prov_dict, indent=2, default=str)
     print(f"  JSON size: {len(json_str)} bytes")
     

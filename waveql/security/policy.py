@@ -22,9 +22,8 @@ Example:
 
 from __future__ import annotations
 import logging
-import re
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Set, Union
+from typing import Callable, Dict, List, Optional, Set, Union
 from enum import Enum
 
 import sqlglot

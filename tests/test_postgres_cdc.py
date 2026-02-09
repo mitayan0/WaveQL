@@ -1,8 +1,6 @@
 
 import pytest
-import psycopg2
 import json
-import asyncio
 from datetime import datetime
 from unittest.mock import MagicMock, patch, AsyncMock
 from waveql.cdc.postgres import PostgresCDCProvider

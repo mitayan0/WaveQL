@@ -9,10 +9,8 @@ These tests verify that WaveQL correctly handles:
 
 import pytest
 import pyarrow as pa
-from typing import List, Any
 
 from waveql.query_planner import QueryPlanner
-from waveql.cursor import WaveQLCursor
 from waveql.adapters.base import BaseAdapter
 from waveql.schema_cache import ColumnInfo
 import waveql

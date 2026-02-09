@@ -14,7 +14,6 @@ Tests cover:
 import pytest
 import os
 from pathlib import Path
-from unittest.mock import patch, mock_open
 
 from waveql.config import (
     WaveQLConfig,

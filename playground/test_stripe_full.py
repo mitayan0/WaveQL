@@ -112,7 +112,7 @@ def test_caching(conn, cursor):
 def test_crud_customers(cursor, conn):
     separator("8. CRUD Operations")
     try:
-        adapter = conn.get_adapter("default")
+        conn.get_adapter("default")
         test_email = f"waveql-test-{datetime.now().strftime('%H%M%S')}@example.com"
         
         # INSERT - Use adapter directly to get the response with ID

@@ -1,6 +1,3 @@
-import pytest
-import time
-from unittest.mock import MagicMock
 from waveql.connection import WaveQLConnection
 from waveql.adapters.base import BaseAdapter
 from waveql.optimizer import QueryOptimizer
@@ -38,17 +35,15 @@ def test_join_reordering_by_latency():
     adapter_slow = MockLatencyAdapter(latency=1.0, avg_rows=1000)
     conn.register_adapter("slow", adapter_slow)
     
-    cursor = conn.cursor()
+    conn.cursor()
     
     # Query involving both tables with NO predicates
     # Should prefer 'fast' first to build filter for 'slow'
-    sql = "SELECT * FROM fast.table JOIN slow.table ON fast.table.id = slow.table.fkey"
     
     # We need to access the planner logic directly or inspect the private method
     # Since we can't easily spy on the internal sorting of execute(), we will expose the sort function
     # or rely on a new optimizer method we invoke.
     
-    from waveql.query_planner import QueryInfo
     
     # Create a mock optimizer we will implement
     optimizer = QueryOptimizer()

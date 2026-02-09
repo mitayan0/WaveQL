@@ -9,7 +9,7 @@ This test file verifies:
 """
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 import pyarrow as pa
 
 from waveql.cursor import WaveQLCursor
@@ -148,7 +148,7 @@ class TestOptimizerIntegration:
         
         # Should convert to IN predicate (pushable) OR be put in residual for client-side filtering
         # The important thing is that we don't silently drop the predicates
-        in_preds = [p for p in pushable if p.operator == "IN"]
+        [p for p in pushable if p.operator == "IN"]
         total_handled = len(pushable) + len(residual)
         assert total_handled > 0, "OR predicates should be handled (not dropped)"
     
@@ -408,23 +408,23 @@ class TestOptimizerCapabilities:
         optimizer = QueryOptimizer()
         caps = optimizer.get_adapter_capabilities("servicenow")
         
-        assert caps["supports_or"] == True  # ServiceNow supports ^OR
-        assert caps["supports_in"] == True
+        assert caps["supports_or"]  # ServiceNow supports ^OR
+        assert caps["supports_in"]
     
     def test_salesforce_capabilities(self):
         """Test Salesforce adapter capabilities."""
         optimizer = QueryOptimizer()
         caps = optimizer.get_adapter_capabilities("salesforce")
         
-        assert caps["supports_or"] == True
-        assert caps["supports_subquery"] == True  # SOQL supports subqueries
+        assert caps["supports_or"]
+        assert caps["supports_subquery"]  # SOQL supports subqueries
     
     def test_jira_capabilities(self):
         """Test Jira adapter capabilities."""
         optimizer = QueryOptimizer()
         caps = optimizer.get_adapter_capabilities("jira")
         
-        assert caps["supports_or"] == True
+        assert caps["supports_or"]
         assert caps["max_in_values"] == 100  # Jira has lower limit
 
 
@@ -438,8 +438,8 @@ class TestCompoundPredicatePushdown:
             predicates=[Predicate(column="x", operator="=", value=1)]
         )
         
-        assert cp.can_push_down({}) == True
-        assert cp.can_push_down({"supports_or": False}) == True
+        assert cp.can_push_down({})
+        assert cp.can_push_down({"supports_or": False})
     
     def test_in_list_pushable_by_default(self):
         """Test that IN list is pushable by default."""
@@ -449,9 +449,9 @@ class TestCompoundPredicatePushdown:
             values=["a", "b", "c"]
         )
         
-        assert cp.can_push_down({}) == True
-        assert cp.can_push_down({"supports_in": True}) == True
-        assert cp.can_push_down({"supports_in": False}) == False
+        assert cp.can_push_down({})
+        assert cp.can_push_down({"supports_in": True})
+        assert not cp.can_push_down({"supports_in": False})
     
     def test_or_group_pushable_with_support(self):
         """Test that OR group is only pushable if adapter supports OR."""
@@ -465,10 +465,10 @@ class TestCompoundPredicatePushdown:
         )
         
         # With OR support
-        assert cp.can_push_down({"supports_or": True}) == True
+        assert cp.can_push_down({"supports_or": True})
         
         # Without OR support but can convert to IN
-        assert cp.can_push_down({"supports_or": False, "supports_in": True}) == True
+        assert cp.can_push_down({"supports_or": False, "supports_in": True})
     
     def test_or_group_to_simple_predicates(self):
         """Test conversion of OR group to IN predicate."""

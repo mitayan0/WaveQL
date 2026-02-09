@@ -2,8 +2,7 @@
 import subprocess
 import json
 import logging
-import io
-from typing import List, Dict, Any, Optional
+from typing import List
 import pyarrow as pa
 from waveql.adapters.base import BaseAdapter
 from waveql.schema_cache import ColumnInfo

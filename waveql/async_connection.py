@@ -6,7 +6,7 @@ Provides async/await support for querying APIs with SQL.
 
 from __future__ import annotations
 import logging
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Dict, Optional, TYPE_CHECKING
 
 import duckdb
 

@@ -4,8 +4,7 @@ Tests for WaveQL Streaming Module.
 
 import pytest
 import pyarrow as pa
-import asyncio
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, AsyncMock
 
 from waveql.streaming import (
     StreamConfig,
@@ -56,7 +55,8 @@ class TestStreamConfig:
         assert config.compression == "snappy"
     
     def test_custom_values(self):
-        callback = lambda n, t: print(n)
+        def callback(n, t):
+            return print(n)
         config = StreamConfig(
             batch_size=500,
             max_records=10000,
@@ -115,7 +115,7 @@ class TestRecordBatchStream:
             config=config,
         )
         
-        batches = list(stream)
+        list(stream)
         
         # Should stop at 125 records
         assert stream.stats.records_fetched <= 150  # Due to batch boundaries
@@ -153,7 +153,7 @@ class TestRecordBatchStream:
         assert stream.schema is None
         
         # Get first batch
-        first_batch = next(iter(stream))
+        next(iter(stream))
         
         # Schema should now be available
         assert stream.schema is not None

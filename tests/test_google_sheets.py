@@ -4,8 +4,6 @@ Tests for Google Sheets Adapter.
 
 import pytest
 import pyarrow as pa
-from unittest.mock import MagicMock, patch
-import os
 
 from waveql.adapters.google_sheets import (
     GoogleSheetsAdapter,

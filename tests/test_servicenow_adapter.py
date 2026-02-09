@@ -1,15 +1,11 @@
 
 import pytest
 import respx
-import requests
-import httpx
 from httpx import Response
-import pyarrow as pa
-from unittest.mock import MagicMock, patch, ANY
+from unittest.mock import patch
 
 from waveql.adapters.servicenow import ServiceNowAdapter
 from waveql.query_planner import Predicate, Aggregate
-from waveql.exceptions import AdapterError, QueryError, RateLimitError
 
 @pytest.fixture
 def adapter_sync():
@@ -137,8 +133,8 @@ async def test_update_async_bulk(adapter):
 @pytest.mark.asyncio
 async def test_delete_async_bulk(adapter):
     with respx.mock:
-        r1 = respx.delete("https://instance.service-now.com/api/now/table/incident/sys_1").mock(return_value=Response(204))
-        r2 = respx.delete("https://instance.service-now.com/api/now/table/incident/sys_2").mock(return_value=Response(204))
+        respx.delete("https://instance.service-now.com/api/now/table/incident/sys_1").mock(return_value=Response(204))
+        respx.delete("https://instance.service-now.com/api/now/table/incident/sys_2").mock(return_value=Response(204))
         
         predicates = [Predicate("sys_id", "IN", ["sys_1", "sys_2"])]
         count = await adapter.delete_async("incident", predicates=predicates)
@@ -344,5 +340,5 @@ async def test_fetch_async_parallel_pages(adapter):
         # Verify order if possible, though parallel might shuffle. 
         # But our list extends in order of completion or index. 
         # The adapter sorts by batch index.
-        ids = [x.as_py() for x in result["id"]]
+        [x.as_py() for x in result["id"]]
         # usage of "params" in respx matches exactly, so we can be sure 0, 5, 10 were called.

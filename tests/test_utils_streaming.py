@@ -6,7 +6,6 @@ This covers the 16% uncovered module waveql/utils/streaming.py
 
 import pytest
 import pyarrow as pa
-from unittest.mock import MagicMock, patch
 from concurrent.futures import ThreadPoolExecutor
 
 from waveql.utils.streaming import ParallelFetcher
@@ -91,7 +90,7 @@ class TestParallelFetcher:
                 return []
             return [{"id": page}]
         
-        result = fetcher.fetch_parallel(mock_fetch, total_pages=None, start_page=2)
+        fetcher.fetch_parallel(mock_fetch, total_pages=None, start_page=2)
         
         # Should have started from page 2
         assert 0 not in pages_fetched

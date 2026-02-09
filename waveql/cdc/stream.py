@@ -6,15 +6,14 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, AsyncIterator, Callable, List
 
-from waveql.cdc.models import Change, ChangeStream, ChangeType, CDCConfig
-from waveql.cdc.providers import get_cdc_provider, BaseCDCProvider
-from waveql.cdc.state import create_state_backend, StateBackend
+from waveql.cdc.models import Change, ChangeStream, CDCConfig
+from waveql.cdc.providers import get_cdc_provider
+from waveql.cdc.state import create_state_backend
 
 if TYPE_CHECKING:
     from waveql.connection import WaveQLConnection
-    from waveql.async_connection import AsyncWaveQLConnection
 
 logger = logging.getLogger(__name__)
 

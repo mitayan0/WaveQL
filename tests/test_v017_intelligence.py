@@ -7,13 +7,12 @@ Includes:
 - Hybrid Querying Routing
 """
 
-import pytest
 import waveql
 import pyarrow as pa
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from waveql.adapters.base import BaseAdapter
-from waveql.contracts.models import RelationshipContract, DataContract, ColumnContract
+from waveql.contracts.models import DataContract, ColumnContract
 
 class MockAdapter(BaseAdapter):
     adapter_name = "mock"

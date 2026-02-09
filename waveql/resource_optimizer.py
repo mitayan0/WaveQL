@@ -21,13 +21,12 @@ Implements three key features for efficient operation on constrained environment
 
 from __future__ import annotations
 import logging
-import math
 import time
 import threading
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
-from collections import defaultdict, deque
+from collections import defaultdict
 from enum import Enum
 
 if TYPE_CHECKING:

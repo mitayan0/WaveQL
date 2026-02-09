@@ -3,9 +3,7 @@ Tests for Cloud Storage Adapter.
 """
 
 import pytest
-import pyarrow as pa
-from unittest.mock import MagicMock, patch, PropertyMock
-import os
+from unittest.mock import patch
 
 from waveql.adapters.cloud_storage import (
     CloudStorageAdapter,

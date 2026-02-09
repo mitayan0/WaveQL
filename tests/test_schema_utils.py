@@ -280,10 +280,10 @@ class TestConvertValue:
     
     def test_convert_to_bool(self):
         """Test converting to boolean."""
-        assert _convert_value(True, pa.bool_()) == True
-        assert _convert_value("true", pa.bool_()) == True
-        assert _convert_value("yes", pa.bool_()) == True
-        assert _convert_value("false", pa.bool_()) == False
+        assert _convert_value(True, pa.bool_())
+        assert _convert_value("true", pa.bool_())
+        assert _convert_value("yes", pa.bool_())
+        assert not _convert_value("false", pa.bool_())
     
     def test_convert_struct(self):
         """Test converting dict to struct."""

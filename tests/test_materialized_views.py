@@ -3,9 +3,6 @@ Tests for Materialized Views functionality
 """
 
 import pytest
-from pathlib import Path
-import tempfile
-import shutil
 
 import pyarrow as pa
 
@@ -205,8 +202,6 @@ class TestMaterializedViewManager:
         
         # Override storage paths
         from waveql.materialized_view.manager import MaterializedViewManager
-        from waveql.materialized_view.registry import ViewRegistry
-        from waveql.materialized_view.storage import ViewStorage
         
         manager = MaterializedViewManager(
             connection=conn,

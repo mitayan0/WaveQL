@@ -15,14 +15,12 @@ catching schema mismatches before they cause downstream failures.
 
 import pyarrow as pa
 import json
-from pathlib import Path
 
 from waveql import (
     DataContract,
     ColumnContract,
     ContractValidator,
     ContractRegistry,
-    ContractValidationResult,
 )
 
 
@@ -311,7 +309,7 @@ def demo_bootstrap_from_arrow():
     )
     
     print(f"Generated contract for: {contract.table}")
-    print(f"Columns:")
+    print("Columns:")
     for col in contract.columns:
         print(f"  - {col.name}: {col.type}")
     print()

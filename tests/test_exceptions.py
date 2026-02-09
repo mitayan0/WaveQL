@@ -11,7 +11,6 @@ Tests cover:
 - ContractViolationError violations tracking
 """
 
-import pytest
 
 from waveql.exceptions import (
     WaveQLError,

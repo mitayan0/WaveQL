@@ -7,7 +7,7 @@ This covers the 35% uncovered module waveql/materialized_view/sync.py
 import pytest
 import pyarrow as pa
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from waveql.materialized_view.sync import (
     IncrementalSyncer,

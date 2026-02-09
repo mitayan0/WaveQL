@@ -124,7 +124,6 @@ class PostgresCDCProvider:
     async def _ensure_slot_exists(self) -> None:
         """Create the replication slot if it doesn't exist."""
         import psycopg2
-        from psycopg2 import sql
         
         conn_str = self._get_connection_string()
         

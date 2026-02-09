@@ -8,7 +8,7 @@ All exceptions include:
 - Context information (adapter, URL, table, etc.)
 """
 
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 
 
 class WaveQLError(Exception):
@@ -153,8 +153,8 @@ class AdapterError(WaveQLError):
             401: f"Authentication required. Provide valid credentials for {adapter_name}.",
             403: f"Access denied. Your credentials don't have permission for this resource in {adapter_name}.",
             404: f"Resource not found. Verify the table/endpoint exists in {adapter_name}.",
-            408: f"Request timed out. Try reducing the query scope or increasing the timeout.",
-            429: f"Rate limit exceeded. Wait before retrying or reduce request frequency.",
+            408: "Request timed out. Try reducing the query scope or increasing the timeout.",
+            429: "Rate limit exceeded. Wait before retrying or reduce request frequency.",
             500: f"Internal server error in {adapter_name}. This is a temporary issue - retry later.",
             502: f"Bad gateway. {adapter_name} may be temporarily unavailable.",
             503: f"Service unavailable. {adapter_name} is down for maintenance.",

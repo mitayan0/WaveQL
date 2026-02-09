@@ -169,7 +169,7 @@ class ServiceNowCDCProvider(BaseCDCProvider):
         for key, value in config.filters.items():
             query_parts.append(f"{key}={value}")
         
-        sysparm_query = "^".join(query_parts) if query_parts else ""
+        "^".join(query_parts) if query_parts else ""
         
         # Fetch changes via adapter
         from waveql.query_planner import Predicate

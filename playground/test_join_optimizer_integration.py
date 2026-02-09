@@ -285,7 +285,7 @@ def analyze_join_ordering():
     print_stats()
     
     # Simulate a cross-adapter join reordering
-    print(f"\n  Simulated join reordering:")
+    print("\n  Simulated join reordering:")
     
     # Create a mock connection that returns None for adapters
     # (the optimizer will use cached stats)
@@ -304,7 +304,7 @@ def analyze_join_ordering():
         print(f"    Output: {' -> '.join(ordered)}")
         
         # Show reasoning
-        print(f"\n  Reasoning (sorted by cost, cheapest first):")
+        print("\n  Reasoning (sorted by cost, cheapest first):")
         for i, t in enumerate(ordered):
             if t in stats:
                 s = stats[t]

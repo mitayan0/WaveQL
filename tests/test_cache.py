@@ -22,7 +22,6 @@ import pyarrow as pa
 from waveql.cache import (
     QueryCache,
     CacheConfig,
-    CacheStats,
     CacheEntry,
     create_cache,
 )

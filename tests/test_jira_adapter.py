@@ -4,7 +4,6 @@ Tests for Jira Adapter.
 
 import pytest
 import responses
-from responses import matchers
 
 from waveql.adapters.jira import JiraAdapter
 from waveql.query_planner import Predicate

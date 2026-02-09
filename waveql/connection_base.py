@@ -9,8 +9,6 @@ from urllib.parse import urlparse, parse_qs, unquote
 
 if TYPE_CHECKING:
     from waveql.auth.manager import AuthManager
-    from waveql.schema_cache import SchemaCache
-    from waveql.adapters.base import BaseAdapter
 
 logger = logging.getLogger(__name__)
 

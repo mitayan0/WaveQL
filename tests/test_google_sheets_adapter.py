@@ -259,7 +259,7 @@ class TestGoogleSheetsAdapterInsert:
     
     def test_insert_row(self, mock_adapter):
         """Test inserting a row."""
-        result = mock_adapter.insert(
+        mock_adapter.insert(
             "Sheet1",
             {"id": "4", "name": "Dave", "age": "28"},
         )

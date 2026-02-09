@@ -10,11 +10,10 @@ Tests for:
 import pytest
 import json
 import tempfile
-from pathlib import Path
 
 from waveql.semantic.views import VirtualView, VirtualViewRegistry
 from waveql.semantic.saved_queries import SavedQuery, SavedQueryRegistry, QueryParameter
-from waveql.semantic.dbt import DbtManifest, DbtModel, DbtColumn
+from waveql.semantic.dbt import DbtManifest
 
 
 class TestVirtualView:

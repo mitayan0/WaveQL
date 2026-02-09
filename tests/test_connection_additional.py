@@ -6,12 +6,9 @@ This covers the 69% uncovered module waveql/connection.py
 
 import pytest
 import pyarrow as pa
-from unittest.mock import MagicMock, patch, PropertyMock
-import tempfile
-import os
+from unittest.mock import MagicMock, patch
 
 from waveql.connection import WaveQLConnection
-from waveql.exceptions import ConnectionError, QueryError
 
 
 class TestWaveQLConnectionAdvanced:
@@ -316,7 +313,7 @@ class TestWaveQLConnectionSchemaCache:
         ]
         connection_with_cache._adapters["test"] = mock_adapter
         
-        schema = connection_with_cache.get_schema("test.users")
+        connection_with_cache.get_schema("test.users")
         
         # Should return schema
     
