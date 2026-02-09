@@ -493,7 +493,7 @@ class HubSpotAdapter(BaseAdapter):
                         try:
                             error_data = response.json()
                             message = error_data.get("message", response.text)
-                        except:
+                        except (ValueError, KeyError):
                             message = response.text
                         raise AdapterError(f"HubSpot API error ({response.status_code}): {message}")
                     return response

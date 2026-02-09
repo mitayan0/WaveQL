@@ -160,7 +160,7 @@ def check_prerequisites():
                     # Slot might already exist, that's ok
                     try:
                         cur.execute("SELECT pg_drop_replication_slot('waveql_check_slot')")
-                    except:
+                    except Exception:
                         pass
                     print_success("wal2json plugin available")
         

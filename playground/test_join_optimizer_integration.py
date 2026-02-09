@@ -371,7 +371,7 @@ if __name__ == "__main__":
         for name, conn in connections:
             try:
                 conn.close()
-            except:
+            except Exception:
                 pass
     
     print("\n" + "="*70)

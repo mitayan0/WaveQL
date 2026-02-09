@@ -140,7 +140,7 @@ def demo_csv_adapter():
     try:
         os.remove(csv_path)
         os.rmdir(temp_dir)
-    except:
+    except Exception:
         pass
     
     print("\n[OK] Demo complete!")

@@ -20,7 +20,7 @@ import pyarrow as pa
 if TYPE_CHECKING:
     from waveql.auth.manager import AuthManager
     from waveql.schema_cache import SchemaCache, ColumnInfo
-    from waveql.query_planner import Predicate
+    from waveql.query_planner import Predicate, Aggregate
     import requests
     import httpx
 
