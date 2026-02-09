@@ -341,8 +341,7 @@ def test_cross_file_join():
     # For cross-file JOINs, we use DuckDB directly since it can read multiple files
     import duckdb
     
-    DATA_DIR / 'orders.csv'
-    employees_path = DATA_DIR / 'employees.csv'
+    employees_path = DATA_DIR / "employees.csv"
     
     # Create a lookup CSV for department budgets
     dept_budget_path = DATA_DIR / 'dept_budget.csv'

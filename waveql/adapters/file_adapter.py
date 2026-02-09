@@ -274,24 +274,21 @@ class FileAdapter(BaseAdapter):
         file_path = self._resolve_path(table)
         
         try:
-            # Substitute parameters
-            resolved_values = {}
-            if parameters:
-                # Handle single parameter set vs batch
-                # If parameters is a list of parameters for this row
-                # Check if parameters is 1D or 2D (batch)
-                # But executemany calls execute_batch, checking base adapter
-                # This insert is for single row mostly via execute
-                pass
-                
+            # Substitute parameters into placeholder values.
+            # This supports both ParameterPlaceholder objects and "?" markers.
+            resolved_values: Dict[str, Any] = {}
             param_idx = 0
             for col, val in values.items():
-                if hasattr(val, 'name') and val.name == 'ParameterPlaceholder' or val == '?':
-                    # Check for ParameterPlaceholder object or string '?'
-                     if parameters and param_idx < len(parameters):
+                is_placeholder = (
+                    hasattr(val, "name")
+                    and getattr(val, "name", None) == "ParameterPlaceholder"
+                ) or val == "?"
+                
+                if is_placeholder:
+                    if parameters and param_idx < len(parameters):
                         resolved_values[col] = parameters[param_idx]
                         param_idx += 1
-                     else:
+                    else:
                         raise QueryError(f"Missing parameter for column {col}")
                 else:
                     resolved_values[col] = val

@@ -1538,14 +1538,6 @@ class WaveQLCursor:
             )
             print(f"Total: {stats.records_fetched:,} records")
         """
-        from waveql.streaming import StreamConfig
-        
-        StreamConfig(
-            batch_size=batch_size,
-            compression=compression,
-            progress_callback=progress_callback,
-        )
-        
         stream = self.stream_batches(
             operation,
             batch_size=batch_size,
