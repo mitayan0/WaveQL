@@ -121,7 +121,7 @@ class ServiceNowAdapter(BaseAdapter):
         table_name = self._extract_table_name(table)
         url = f"{self._host}/api/now/table/{table_name}"
         
-        params = self._build_query_params(columns, predicates, limit, offset, order_by)
+        params = self._build_query_params(columns, predicates, limit, offset, order_by, table_name)
         
         # Log the API query for observability
         logger.debug(
@@ -173,7 +173,7 @@ class ServiceNowAdapter(BaseAdapter):
             return await self._fetch_stats_async(table, predicates, group_by, aggregates, order_by, limit)
 
         url = f"{self._host}/api/now/table/{table_name}"
-        params = self._build_query_params(columns, predicates, limit, offset, order_by)
+        params = self._build_query_params(columns, predicates, limit, offset, order_by, table_name)
         
         if limit and limit <= self._page_size:
             records = await self._fetch_page_async(url, params)
@@ -201,15 +201,29 @@ class ServiceNowAdapter(BaseAdapter):
             table = table.rsplit(".", 1)[1]
         return table.strip('"')
 
-    def _clean_column_name(self, col: str) -> str:
+    def _clean_column_name(self, col: str, table_name: str = None) -> str:
         """
         Clean a column name by stripping quotes and table prefixes/aliases.
+        Preserves dot-walking (e.g., 'assigned_to.email') unless it matches
+        the query table name.
         """
         if not col or col == "*":
             return col
+            
+        # Standardize quotes
+        col = col.strip('"')
+        
         if "." in col:
-            col = col.rsplit(".", 1)[1]
-        return col.strip('"')
+            parts = col.split(".")
+            # If the first part matches the current table, it's an alias -> remove it
+            if table_name and parts[0] == table_name:
+                return ".".join(parts[1:])
+            
+            # Otherwise, assume it's a valid dot-walk reference field -> keep it
+            # e.g. "super_class.name" or "caller_id.email"
+            return col
+            
+        return col
 
     def _build_query_params(
         self,
@@ -218,6 +232,7 @@ class ServiceNowAdapter(BaseAdapter):
         limit: int,
         offset: int,
         order_by: List[tuple],
+        table_name: str = None, 
     ) -> Dict[str, str]:
         """Build ServiceNow query parameters."""
         params = {}
@@ -228,13 +243,15 @@ class ServiceNowAdapter(BaseAdapter):
 
         # Column selection
         if columns and columns != ["*"]:
-            params["sysparm_fields"] = ",".join(self._clean_column_name(c) for c in columns)
+            params["sysparm_fields"] = ",".join(
+                self._clean_column_name(c, table_name) for c in columns
+            )
         
         # Predicate pushdown
         if predicates:
             query_parts = []
             for pred in predicates:
-                sql_pred = self._predicate_to_query(pred)
+                sql_pred = self._predicate_to_query(pred, table_name)
                 if sql_pred:
                     query_parts.append(sql_pred)
             if query_parts:
@@ -254,16 +271,16 @@ class ServiceNowAdapter(BaseAdapter):
             order_parts = []
             for col, direction in order_by:
                 prefix = "" if direction == "ASC" else "DESC"
-                order_parts.append(f"{prefix}{self._clean_column_name(col)}")
+                order_parts.append(f"{prefix}{self._clean_column_name(col, table_name)}")
             params["sysparm_query"] = params.get("sysparm_query", "") + \
                                       ("^" if params.get("sysparm_query") else "") + \
                                       f"ORDERBY{','.join(order_parts)}"
         
         return params
 
-    def _predicate_to_query(self, pred: "Predicate") -> str:
+    def _predicate_to_query(self, pred: "Predicate", table_name: str = None) -> str:
         """Convert predicate to ServiceNow query syntax."""
-        col = self._clean_column_name(pred.column)
+        col = self._clean_column_name(pred.column, table_name)
         op = pred.operator
         val = pred.value
         
@@ -380,7 +397,7 @@ class ServiceNowAdapter(BaseAdapter):
         first_page_params = {**params, "sysparm_offset": "0", "sysparm_limit": str(page_size)}
         first_page = await self._fetch_page_async(url, first_page_params)
         
-        if len(first_page) < page_size:
+        if not first_page:
             return first_page[:limit] if limit else first_page
         
         all_records = list(first_page)
@@ -430,7 +447,8 @@ class ServiceNowAdapter(BaseAdapter):
             found_partial = False
             for _, records in results:
                 all_records.extend(records)
-                if len(records) < page_size:
+                # Only break if we get NO records, to handle ACL filtering "short page" issues
+                if not records:
                     found_partial = True
                     break
             
@@ -455,8 +473,8 @@ class ServiceNowAdapter(BaseAdapter):
                 records = self._fetch_page(url, page_params, client)
                 all_records.extend(records)
                 
-                # Stop if page is not full (indicates last page) or if we've hit the limit
-                if len(records) < page_size:
+                # Stop if NO records returned (fixes ACL short-page issue)
+                if not records:
                     break
                     
                 offset += page_size
@@ -747,15 +765,24 @@ class ServiceNowAdapter(BaseAdapter):
                 # Usually we want the definition from the most specific table, but sys_dictionary 
                 # often defines it once. We'll simply take the first one seen or overwrite.
                 # Given logic order is usually arbitrary unless sorted, we'll store all and dedupe.
+                if isinstance(name, dict):
+                    name = name.get("value", str(name))
+                
                 if name in columns_map:
                     continue
 
                 internal_type = row.get("internal_type", "string")
-                is_mandatory = row.get("mandatory") == "true"
-                is_primary = row.get("primary") == "true" or name == "sys_id"
-                is_read_only = row.get("read_only") == "true"
+                if isinstance(internal_type, dict):
+                    internal_type = internal_type.get("value", str(internal_type))
+                
+                is_mandatory = str(row.get("mandatory")).lower() == "true"
+                is_primary = str(row.get("primary")).lower() == "true" or name == "sys_id"
+                is_read_only = str(row.get("read_only")).lower() == "true"
                 
                 default_val = row.get("default_value", "")
+                if isinstance(default_val, dict):
+                    default_val = default_val.get("value", str(default_val))
+                    
                 is_auto_inc = "javascript:getNextObjNumber" in str(default_val) or "Next Obj Number" in str(default_val)
                 
                 arrow_type = self.TYPE_MAP.get(internal_type, pa.string())
@@ -866,15 +893,24 @@ class ServiceNowAdapter(BaseAdapter):
                 name = row.get("element")
                 if not name: continue 
                 
+                if isinstance(name, dict):
+                    name = name.get("value", str(name))
+                
                 if name in columns_map:
                     continue
 
                 internal_type = row.get("internal_type", "string")
-                is_mandatory = row.get("mandatory") == "true"
-                is_primary = row.get("primary") == "true" or name == "sys_id"
-                is_read_only = row.get("read_only") == "true"
+                if isinstance(internal_type, dict):
+                    internal_type = internal_type.get("value", str(internal_type))
+                
+                is_mandatory = str(row.get("mandatory")).lower() == "true"
+                is_primary = str(row.get("primary")).lower() == "true" or name == "sys_id"
+                is_read_only = str(row.get("read_only")).lower() == "true"
                 
                 default_val = row.get("default_value", "")
+                if isinstance(default_val, dict):
+                    default_val = default_val.get("value", str(default_val))
+                    
                 is_auto_inc = "javascript:getNextObjNumber" in str(default_val) or "Next Obj Number" in str(default_val)
                 
                 arrow_type = self.TYPE_MAP.get(internal_type, pa.string())

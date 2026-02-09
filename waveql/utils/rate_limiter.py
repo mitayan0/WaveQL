@@ -87,6 +87,10 @@ class RateLimiter:
                             except ValueError:
                                 retry_after = None
                 
+                # Check for httpx connection/protocol errors
+                elif isinstance(e, (httpx.RemoteProtocolError, httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ReadError)):
+                    should_retry = True
+                
                 if not should_retry or attempt == self.max_retries:
                     raise
                 
@@ -144,6 +148,10 @@ class RateLimiter:
                                 retry_after = int(retry_after)
                             except ValueError:
                                 retry_after = None
+                
+                # Check for httpx connection/protocol errors
+                elif isinstance(e, (httpx.RemoteProtocolError, httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ReadError)):
+                    should_retry = True
                 
                 if not should_retry or attempt == self.max_retries:
                     raise
