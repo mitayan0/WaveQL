@@ -24,7 +24,6 @@ Usage:
 import os
 import sys
 from pathlib import Path
-from datetime import datetime, timedelta
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -45,7 +44,6 @@ from waveql.semantic.views import (
     SemanticMetric,
 )
 from waveql.semantic.dbt import (
-    DBTModelLoader,
     DBTSource,
     DBTModel,
 )
@@ -215,7 +213,7 @@ def test_semantic_view():
     
     # Generate SQL
     sql = view.to_sql()
-    print(f"\n  Generated SQL:")
+    print("\n  Generated SQL:")
     print(f"    {sql}")
     
     print("  ✓ Semantic view works")
@@ -259,7 +257,7 @@ def test_semantic_view_registry():
     
     # Get specific view
     view = registry.get("critical_incidents")
-    print(f"\n  'critical_incidents' view:")
+    print("\n  'critical_incidents' view:")
     print(f"    Description: {view.description}")
     print(f"    Filters: {view.filters}")
     
@@ -288,9 +286,9 @@ def test_view_expansion():
     # Expand view references
     expanded = registry.expand_views(query)
     
-    print(f"  Original query:")
+    print("  Original query:")
     print(f"    {query}")
-    print(f"\n  Expanded query:")
+    print("\n  Expanded query:")
     print(f"    {expanded}")
     
     print("  ✓ View expansion works")
@@ -366,7 +364,7 @@ def test_dbt_model():
     print(f"  Description: {model.description}")
     print(f"  Materialized: {model.materialized}")
     print(f"  Dependencies: {model.depends_on}")
-    print(f"\n  SQL (excerpt):")
+    print("\n  SQL (excerpt):")
     for line in model.sql.strip().split('\n')[:5]:
         print(f"    {line}")
     
@@ -489,7 +487,7 @@ def test_semantic_views_with_servicenow():
         columns = ", ".join([c.source_column for c in view.columns])
         query = f"SELECT {columns} FROM incident WHERE {where_clause} LIMIT 5"
         
-        print(f"  Generated query from semantic view:")
+        print("  Generated query from semantic view:")
         print(f"    {query}")
         
         cursor.execute(query)
@@ -523,11 +521,6 @@ def test_metrics_aggregation():
         cursor = conn.cursor()
         
         # Define metrics
-        metrics = {
-            "total_incidents": "COUNT(*)",
-            "critical_count": "SUM(CASE WHEN priority = 1 THEN 1 ELSE 0 END)",
-            "open_count": "SUM(CASE WHEN state != 6 THEN 1 ELSE 0 END)",
-        }
         
         # Execute aggregation
         cursor.execute("SELECT COUNT(*) as total FROM default")

@@ -13,7 +13,7 @@ Tests cover:
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock
 import pyarrow as pa
 
 from waveql.adapters.base import BaseAdapter

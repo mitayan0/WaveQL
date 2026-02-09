@@ -1,12 +1,10 @@
 
 import pytest
 from unittest.mock import MagicMock, patch, ANY
-import asyncio
-from datetime import datetime
 import json
 
 from waveql.cdc.postgres import PostgresCDCProvider
-from waveql.cdc.models import ChangeType, CDCConfig
+from waveql.cdc.models import ChangeType
 
 class TestPostgresCDCProvider:
     
@@ -293,7 +291,7 @@ class TestPostgresCDCProvider:
                 return mock_msg
             return None
             
-        with patch("asyncio.get_event_loop") as mock_loop:
+        with patch("asyncio.get_event_loop"):
             # We want to break the loop by setting _running = False
             # We can do this by having the usage loop break it
             # But stream_changes loop checks self._running

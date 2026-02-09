@@ -6,7 +6,7 @@ This covers the 29% uncovered module waveql/provenance/traced_adapter.py
 
 import pytest
 import pyarrow as pa
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 from waveql.provenance.traced_adapter import (
     find_primary_key_column,

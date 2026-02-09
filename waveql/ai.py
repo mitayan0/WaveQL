@@ -18,8 +18,8 @@ Usage:
 from __future__ import annotations
 import os
 import logging
-from typing import Any, Dict, List, Optional, Union
-from dataclasses import dataclass, field
+from typing import List, Optional
+from dataclasses import dataclass
 
 import pyarrow as pa
 

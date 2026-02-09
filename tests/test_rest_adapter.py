@@ -2,11 +2,10 @@
 import pytest
 import requests
 import pyarrow as pa
-import json
 import logging
 from unittest.mock import MagicMock, patch
 from waveql.adapters.rest_adapter import RESTAdapter
-from waveql.exceptions import AdapterError, QueryError, RateLimitError
+from waveql.exceptions import QueryError
 from waveql.query_planner import Predicate
 from waveql.schema_cache import ColumnInfo, SchemaCache
 
@@ -146,9 +145,9 @@ def test_crud_ops_full(mock_session, adapter):
 
 def test_schema_cache_full(mock_session, adapter):
     mock_session.get.return_value.json.return_value = [{"id": 1}]
-    s1 = adapter.get_schema("users")
+    adapter.get_schema("users")
     assert mock_session.get.call_count == 1
-    s2 = adapter.get_schema("users")
+    adapter.get_schema("users")
     assert mock_session.get.call_count == 1 # Hits 458
     
     # _get_or_discover_schema also hits cache at 377

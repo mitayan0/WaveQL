@@ -1,7 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
 from waveql.adapters.servicenow import ServiceNowAdapter
-from waveql.schema_cache import ColumnInfo
 
 @pytest.fixture
 def adapter():
@@ -37,7 +36,7 @@ def test_fetch_schema_with_hierarchy_success(adapter):
             ]
         return []
 
-    with patch.object(adapter, "_fetch_page", side_effect=mock_fetch_page_side_effect) as mock_fetch:
+    with patch.object(adapter, "_fetch_page", side_effect=mock_fetch_page_side_effect):
         columns = adapter._fetch_schema_from_metadata("sc_req_item")
         
         assert columns is not None

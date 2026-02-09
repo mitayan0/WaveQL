@@ -10,17 +10,14 @@ Features:
 """
 
 from __future__ import annotations
-import json
 import logging
-from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
-from urllib.parse import quote
+from typing import Any, Dict, List, Sequence, TYPE_CHECKING
 
 import requests
-import httpx
 import pyarrow as pa
 
 from waveql.adapters.base import BaseAdapter
-from waveql.exceptions import AdapterError, QueryError, RateLimitError
+from waveql.exceptions import QueryError, RateLimitError
 from waveql.schema_cache import ColumnInfo
 
 if TYPE_CHECKING:

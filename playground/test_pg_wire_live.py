@@ -26,8 +26,6 @@ import sys
 import asyncio
 import socket
 import struct
-import threading
-import time
 from pathlib import Path
 
 # Add project root to path
@@ -41,23 +39,15 @@ if sys.platform == "win32":
 from dotenv import load_dotenv
 load_dotenv()
 
-import waveql
 from waveql.pg_wire.server import PGWireServer
 from waveql.pg_wire.protocol import (
     MessageWriter,
-    MessageReader,
-    MessageType,
-    AuthType,
-    TransactionStatus,
-    FormatCode,
-    StartupMessage
+    MessageType
 )
 from waveql.pg_wire.type_mapping import (
     arrow_to_pg_type,
     pg_type_oid,
     encode_value,
-    decode_value,
-    PG_TYPES,
 )
 
 # Configuration
@@ -257,7 +247,7 @@ def test_server_initialization():
             connection=None,  # Mock
         )
         
-        print(f"  Server initialized")
+        print("  Server initialized")
         print(f"  Server object: {server}")
         
         print("  ✓ Server initialization works")

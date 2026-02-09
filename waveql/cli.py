@@ -4,7 +4,7 @@ import argparse
 import time
 import logging
 import pyarrow as pa
-from typing import Optional, List
+from typing import Optional
 
 import waveql
 from waveql.exceptions import WaveQLError

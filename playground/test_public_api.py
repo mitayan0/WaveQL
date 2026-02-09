@@ -1,5 +1,4 @@
 import waveql
-import json
 
 def test_json_placeholder():
     print("--- Connecting to JSONPlaceholder API ---")

@@ -10,7 +10,7 @@ JSON/dict records, supporting:
 """
 
 from __future__ import annotations
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional
 from collections import defaultdict
 
 import pyarrow as pa

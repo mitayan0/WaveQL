@@ -15,7 +15,6 @@ from waveql.semantic import (
     VirtualView, 
     VirtualViewRegistry, 
     SavedQuery, 
-    SavedQueryRegistry,
     DbtManifest
 )
 

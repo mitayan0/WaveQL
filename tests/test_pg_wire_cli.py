@@ -3,7 +3,6 @@ Comprehensive tests for waveql/pg_wire/cli.py - targets 100% coverage
 """
 
 import sys
-import signal
 import asyncio
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
@@ -219,7 +218,6 @@ class TestSignalHandling:
             
             # Track if signal handlers were added
             handlers_added = []
-            original_add = loop.add_signal_handler
             
             def track_add(sig, callback):
                 handlers_added.append(sig)

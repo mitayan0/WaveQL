@@ -23,7 +23,6 @@ import os
 import sys
 import asyncio
 from pathlib import Path
-from datetime import datetime
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -36,11 +35,8 @@ if sys.platform == "win32":
 from dotenv import load_dotenv
 load_dotenv()
 
-import waveql
 from waveql.ai import (
     get_embedding_provider,
-    VectorSearchManager,
-    EmbeddingProvider,
     EmbeddingConfig,
     OpenAIEmbedding,
     OllamaEmbedding,
@@ -170,7 +166,7 @@ def test_openai_embeddings():
         text = "WaveQL is a universal SQL interface for SaaS APIs"
         embedding = provider.embed_single(text)
         
-        print(f"  Model: text-embedding-3-small")
+        print("  Model: text-embedding-3-small")
         print(f"  Text: '{text}'")
         print(f"  Embedding dimensions: {len(embedding)}")
         print(f"  First 5 values: {[f'{v:.6f}' for v in embedding[:5]]}")
@@ -186,7 +182,7 @@ def test_openai_embeddings():
         sim_similar = cosine_similarity(e_original, e_similar)
         sim_different = cosine_similarity(e_original, e_different)
         
-        print(f"\n  Semantic similarity test:")
+        print("\n  Semantic similarity test:")
         print(f"    Original vs Similar: {sim_similar:.4f}")
         print(f"    Original vs Different: {sim_different:.4f}")
         print(f"    Similar > Different: {sim_similar > sim_different} ✓")

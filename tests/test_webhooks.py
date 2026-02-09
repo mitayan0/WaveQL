@@ -5,7 +5,6 @@ import hmac
 import hashlib
 import base64
 import time
-import threading
 import requests
 import httpx
 from unittest.mock import MagicMock, patch

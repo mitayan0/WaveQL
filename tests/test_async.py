@@ -1,5 +1,4 @@
 
-import asyncio
 import pytest
 import respx
 import httpx

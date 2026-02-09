@@ -4,13 +4,11 @@ import sqlite3
 import json
 import uuid
 from datetime import datetime
-from unittest.mock import MagicMock, patch, ANY
+from unittest.mock import MagicMock, patch
 from waveql.transaction.coordinator import (
     TransactionCoordinator, TransactionLog, TransactionState, 
     OperationType, InsertResult
 )
-from waveql.query_planner import Predicate
-from waveql.exceptions import QueryError
 
 # --- Fixtures ---
 
@@ -159,7 +157,7 @@ def test_update_flow(coordinator, mock_adapter):
     assert op.compensation.original_data == {"id": "123", "val": "old"}
 
 def test_rollback_update(coordinator, mock_adapter):
-    txn = coordinator.begin()
+    coordinator.begin()
     coordinator.update("mock.users", {"name": "Bob"}, {"id": "123"})
     
     # Rollback should Update back to old values
@@ -201,7 +199,7 @@ def test_delete_flow(coordinator, mock_adapter):
     assert op.compensation.original_data == {"id": "123", "val": "old"}
 
 def test_rollback_delete(coordinator, mock_adapter):
-    txn = coordinator.begin()
+    coordinator.begin()
     coordinator.delete("mock.users", {"id": "123"})
     
     # Rollback should Insert back the old values
@@ -283,7 +281,7 @@ def test_recovery(transaction_log, mock_adapter):
     assert loaded.state == TransactionState.ROLLED_BACK
 
 def test_retry_dlq(coordinator, mock_adapter):
-    txn = coordinator.begin()
+    coordinator.begin()
     from waveql.transaction.coordinator import CompensatingAction
     comp = CompensatingAction(
         adapter_name="mock",
@@ -352,7 +350,7 @@ def test_context_manager(coordinator, mock_adapter):
     # Mock for insert
     mock_adapter.insert.return_value = {"id": "1"}
     
-    with coordinator.transaction() as txn:
+    with coordinator.transaction():
         coordinator.insert("mock.users", {"name": "cm"})
     
     assert mock_adapter.insert.called
@@ -415,7 +413,6 @@ def test_transaction_log_errors(transaction_log):
     assert transaction_log.get_pending_transactions() == []
 
 def test_insert_result_variants():
-    from waveql.transaction.coordinator import InsertResult
     # From InsertResult
     ir = InsertResult(1, "123")
     assert InsertResult.from_adapter_result(ir, {}) == ir

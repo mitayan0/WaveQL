@@ -62,6 +62,15 @@ packages = ["waveql"]
 line-length = 100
 target-version = "py39"
 
+[tool.ruff.lint]
+ignore = [
+    "E701",  # Multiple statements on one line (colon) - style preference
+    "F402",  # Import shadowed by loop variable - common pattern in schema iteration
+    "E402",  # Module level import not at top of file - test files load env first
+    "E741",  # Ambiguous variable name - l used in test utilities
+    "F811",  # Redefinition of unused - test function variants with same name
+]
+
 [tool.black]
 line-length = 100
 target-version = ["py39"]

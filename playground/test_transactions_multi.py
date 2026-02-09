@@ -24,12 +24,9 @@ Usage:
 
 import os
 import sys
-import asyncio
 from pathlib import Path
 from datetime import datetime
 import tempfile
-import json
-import uuid
 from unittest.mock import MagicMock 
 
 # Add project root to path
@@ -51,7 +48,6 @@ from waveql.transaction.coordinator import (
     TransactionState,
     InsertResult,
     Transaction,
-    TransactionOperation,
     CompensatingAction,
     OperationType
 )
@@ -282,7 +278,7 @@ def test_transaction_coordinator_mock():
             log=log,
         )
         
-        print(f"  Coordinator initialized")
+        print("  Coordinator initialized")
         
         # Test begin/commit without operations
         tx = coordinator.begin()
@@ -290,7 +286,7 @@ def test_transaction_coordinator_mock():
         
         # Commit empty transaction
         coordinator.commit()
-        print(f"  Transaction committed")
+        print("  Transaction committed")
         
         print("  ✓ Transaction coordinator initialization works")
         return True
@@ -322,16 +318,16 @@ def test_transaction_rollback_mock():
         # Perform insert (which succeeds)
         try:
             coordinator.insert("mock.table", {"col": "val"})
-            print(f"  Insert executed")
+            print("  Insert executed")
             
             # Simulate failure elsewhere by calling rollback manually
             # In real code this would catch an exception
-            print(f"  Simulating error, rolling back...")
+            print("  Simulating error, rolling back...")
             coordinator.rollback()
             
             # Verify delete was called (compensation)
             mock_adapter.delete.assert_called()
-            print(f"  Compensation delete called verified")
+            print("  Compensation delete called verified")
             
         except Exception as e:
             print(f"  Unexpected error: {e}")
@@ -467,7 +463,7 @@ def test_multi_adapter_transaction():
                 # 4. Rollback (to test compensation in live env)
                 # We ROLLBACK so we don't spam the actual system permanently
                 coordinator.rollback()
-                print(f"  Transaction rolled back successfully")
+                print("  Transaction rolled back successfully")
                 
             except Exception as e:
                 print(f"  Error during operations: {e}")

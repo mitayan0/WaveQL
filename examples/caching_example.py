@@ -93,7 +93,7 @@ def demo_custom_ttl():
     time.sleep(6)
     
     cursor.execute("SELECT * FROM employees")
-    print(f"After TTL expired: cache miss (re-fetched from source)")
+    print("After TTL expired: cache miss (re-fetched from source)")
     print(f"Stats: {conn.cache_stats.to_dict()}")
     
     conn.close()

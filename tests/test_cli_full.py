@@ -5,7 +5,6 @@ Comprehensive CLI tests - targets 100% coverage of waveql/cli.py
 import sys
 import pytest
 from unittest.mock import patch, MagicMock, PropertyMock
-from io import StringIO
 import pyarrow as pa
 
 from waveql.cli import (

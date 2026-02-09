@@ -10,10 +10,8 @@ Tests cover:
 - ColumnInfo and TableSchema dataclasses
 """
 
-import pytest
 import time
 import threading
-from pathlib import Path
 
 from waveql.schema_cache import (
     SchemaCache,

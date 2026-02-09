@@ -13,7 +13,6 @@ Tests cover:
 - Parameterized queries
 """
 
-import pytest
 
 from waveql.query_planner import (
     QueryPlanner,

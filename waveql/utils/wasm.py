@@ -5,8 +5,8 @@ This module provides helpers for detecting and handling WebAssembly environments
 (specifically Pyodide) to ensure code portability.
 """
 import sys
-import os
 import logging
+import importlib.util
 
 logger = logging.getLogger(__name__)
 
@@ -18,12 +18,9 @@ def is_wasm() -> bool:
     if sys.platform in ("emscripten", "wasi", "js"):
         return True
     
-    # Check for pyodide module
-    try:
-        import pyodide # type: ignore
+    # Check for pyodide module using importlib.util.find_spec
+    if importlib.util.find_spec("pyodide") is not None:
         return True
-    except ImportError:
-        pass
         
     return False
 

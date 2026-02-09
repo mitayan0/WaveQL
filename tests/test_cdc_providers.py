@@ -7,8 +7,7 @@ This covers the 30% uncovered module waveql/cdc/providers.py
 import pytest
 import pyarrow as pa
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock, patch, AsyncMock
-import asyncio
+from unittest.mock import MagicMock
 
 from waveql.cdc.providers import (
     BaseCDCProvider,
@@ -16,7 +15,7 @@ from waveql.cdc.providers import (
     SalesforceCDCProvider,
     JiraCDCProvider,
 )
-from waveql.cdc.models import CDCConfig, Change, ChangeType
+from waveql.cdc.models import CDCConfig, ChangeType
 
 
 class TestBaseCDCProvider:

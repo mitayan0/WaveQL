@@ -1,11 +1,9 @@
 
 import pytest
-import sys
-from unittest.mock import MagicMock, patch, ANY
-import pyarrow as pa
+from unittest.mock import MagicMock, patch
 from waveql.ai import (
     EmbeddingConfig, MockEmbedding, OpenAIEmbedding, OllamaEmbedding,
-    VectorSearchManager, get_embedding_provider, register_ai_functions
+    VectorSearchManager, register_ai_functions
 )
 
 # --- Embedding Config & Provider Tests ---

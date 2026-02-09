@@ -24,10 +24,10 @@ Usage (Export):
 from __future__ import annotations
 import logging
 from typing import (
-    Any, AsyncIterator, Callable, Dict, Generator, Iterator, 
+    AsyncIterator, Callable, Dict, Generator, Iterator, 
     List, Optional, TYPE_CHECKING, Union
 )
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import asyncio
 
 import pyarrow as pa
@@ -35,7 +35,6 @@ import pyarrow.parquet as pq
 
 if TYPE_CHECKING:
     from waveql.adapters.base import BaseAdapter
-    from waveql.query_planner import QueryInfo
 
 logger = logging.getLogger(__name__)
 

@@ -13,7 +13,6 @@ from waveql.contracts import (
     ColumnContract,
     ContractValidator,
     ContractRegistry,
-    ContractValidationResult,
     ViolationType,
 )
 from waveql.exceptions import ContractViolationError

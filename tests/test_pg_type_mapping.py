@@ -6,9 +6,7 @@ This covers the 52% uncovered module waveql/pg_wire/type_mapping.py
 
 import pytest
 import pyarrow as pa
-from datetime import date, datetime, time, timedelta
-from decimal import Decimal
-import struct
+from datetime import date, datetime
 
 from waveql.pg_wire.type_mapping import (
     PGType,
@@ -22,7 +20,6 @@ from waveql.pg_wire.type_mapping import (
     encode_value,
     decode_value,
     OID_TO_TYPE,
-    PG_TYPES,
 )
 
 

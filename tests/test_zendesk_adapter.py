@@ -7,7 +7,6 @@ This covers the 63% uncovered module waveql/adapters/zendesk.py
 import pytest
 import pyarrow as pa
 from unittest.mock import MagicMock, AsyncMock, patch
-from typing import List
 
 from waveql.adapters.zendesk import ZendeskAdapter
 from waveql.query_planner import Predicate

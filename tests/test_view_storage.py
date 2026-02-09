@@ -14,7 +14,6 @@ from unittest.mock import patch, MagicMock
 import pyarrow as pa
 
 from waveql.materialized_view.storage import ViewStorage
-from waveql.materialized_view.models import ViewStats
 
 
 class TestViewStorageInit:
@@ -29,7 +28,7 @@ class TestViewStorageInit:
     def test_init_creates_directory(self, tmp_path):
         """Test that init creates the base directory."""
         new_path = tmp_path / "views" / "data"
-        storage = ViewStorage(base_path=new_path)
+        ViewStorage(base_path=new_path)
         assert new_path.exists()
     
     def test_init_default_path(self):
@@ -203,7 +202,7 @@ class TestViewStorageUpsert:
         
         # Upsert with updates
         data2 = pa.table({"id": [2, 3], "name": ["Bobby", "Charlie"]})
-        stats = storage.upsert("test_view", data2, key_column="id")
+        storage.upsert("test_view", data2, key_column="id")
         
         # Should have 3 rows: id=1 (original), id=2 (updated), id=3 (new)
         result = storage.read("test_view")

@@ -106,7 +106,7 @@ async def consume_changes(stream: MockCDCStream):
     
     count = 0
     async for change in stream:
-        print(f"\n[Consumer] Captured change:")
+        print("\n[Consumer] Captured change:")
         print(f"  Operation: {change.operation.value}")
         print(f"  Key: {change.key}")
         if change.data:

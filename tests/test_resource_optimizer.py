@@ -9,23 +9,16 @@ Tests the three key features:
 
 import pytest
 import time
-from unittest.mock import MagicMock, patch
 
 from waveql.resource_optimizer import (
-    CardinalityEstimator,
     CardinalityStats,
     get_cardinality_estimator,
-    AdaptivePagination,
-    PaginationState,
     AIMDState,
     get_adaptive_pagination,
     BudgetPlanner,
     QueryBudget,
     BudgetUnit,
-    BudgetContext,
-    get_budget_planner,
     ResourceAwareExecutor,
-    get_resource_executor,
 )
 from waveql.query_planner import Predicate
 

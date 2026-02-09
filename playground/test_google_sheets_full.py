@@ -181,7 +181,7 @@ def test_insert(cursor, conn):
         cols_str = ", ".join([quote_column(c) for c in cols])
         
         cursor.execute(f"INSERT INTO Sheet1 ({cols_str}) VALUES ({values_str})")
-        print(f"  ✓ Inserted test row")
+        print("  ✓ Inserted test row")
     except Exception as e:
         print(f"  ⚠ Insert test: {e}")
         return False

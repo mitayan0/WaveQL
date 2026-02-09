@@ -8,7 +8,6 @@ Tests cover:
 - Edge cases (special characters, missing parts, etc.)
 """
 
-import pytest
 from unittest.mock import Mock, patch
 
 from waveql.connection_base import ConnectionMixin

@@ -7,7 +7,7 @@ This covers the 38% uncovered module waveql/cdc/stream.py
 import pytest
 import pyarrow as pa
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, AsyncMock
 import asyncio
 
 from waveql.cdc.stream import (

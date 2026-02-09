@@ -6,11 +6,9 @@ This covers the 54% uncovered module waveql/async_cursor.py
 
 import pytest
 import pyarrow as pa
-import asyncio
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock, AsyncMock
 
 from waveql.async_cursor import AsyncWaveQLCursor
-from waveql.exceptions import QueryError
 
 
 class TestAsyncWaveQLCursorInit:
@@ -366,7 +364,7 @@ class TestAsyncWaveQLCursorStreamToFile:
         """Test streaming to file."""
         output_file = str(tmp_path / "output.parquet")
         
-        result = await cursor_for_file_streaming.stream_to_file_async(
+        await cursor_for_file_streaming.stream_to_file_async(
             "SELECT * FROM test.data",
             output_path=output_file,
             batch_size=10,

@@ -10,16 +10,15 @@ Provides type-safe, auto-validating schema contracts that can be:
 
 from __future__ import annotations
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional, Set, Union
+from typing import Any, Dict, List, Literal, Optional
 from dataclasses import dataclass, field
-import json
 import hashlib
 
 try:
-    from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
+    from pydantic import BaseModel, Field, field_validator, ConfigDict
     PYDANTIC_V2 = True
 except ImportError:
-    from pydantic import BaseModel, Field, validator, root_validator
+    from pydantic import BaseModel, Field, validator
     PYDANTIC_V2 = False
 
 import pyarrow as pa
@@ -417,27 +416,27 @@ class DataContract(AdaptiveModel):
         }
         
         columns = []
-        for field in schema:
+        for fld in schema:
             col_type = "string"  # Default
             
             # Check exact match
-            if field.type in arrow_to_type:
-                col_type = arrow_to_type[field.type]
-            elif pa.types.is_timestamp(field.type):
+            if fld.type in arrow_to_type:
+                col_type = arrow_to_type[fld.type]
+            elif pa.types.is_timestamp(fld.type):
                 col_type = "timestamp"
-            elif pa.types.is_integer(field.type):
+            elif pa.types.is_integer(fld.type):
                 col_type = "integer"
-            elif pa.types.is_floating(field.type):
+            elif pa.types.is_floating(fld.type):
                 col_type = "float"
-            elif pa.types.is_struct(field.type):
+            elif pa.types.is_struct(fld.type):
                 col_type = "struct"
-            elif pa.types.is_list(field.type):
+            elif pa.types.is_list(fld.type):
                 col_type = "list"
             
             columns.append(ColumnContract(
-                name=field.name,
+                name=fld.name,
                 type=col_type,
-                nullable=field.nullable,
+                nullable=fld.nullable,
             ))
         
         return cls(

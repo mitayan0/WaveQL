@@ -1,6 +1,5 @@
 import pytest
 import sqlalchemy as sa
-import pyarrow as pa
 from waveql.adapters.sql import SQLAdapter
 from waveql.query_planner import Predicate
 

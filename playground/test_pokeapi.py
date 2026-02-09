@@ -1,6 +1,5 @@
 import waveql
 import time
-import pyarrow as pa
 
 def test_pokeapi_complex():
     print("--- Connecting to PokeAPI (Complex Nested Data) ---")

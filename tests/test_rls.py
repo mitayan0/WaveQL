@@ -11,15 +11,12 @@ Tests cover:
 """
 
 import pytest
-import pyarrow as pa
 
 from waveql.security.policy import (
     SecurityPolicy,
     PolicyManager,
     PolicyMode,
-    PolicyViolationError,
 )
-from waveql.query_planner import Predicate
 
 
 class TestSecurityPolicy:

@@ -6,12 +6,10 @@ This covers the 82% uncovered module waveql/adapters/base.py
 
 import pytest
 import pyarrow as pa
-from unittest.mock import MagicMock, patch, AsyncMock
-from datetime import datetime
+from unittest.mock import MagicMock, AsyncMock
 
 from waveql.adapters.base import BaseAdapter
 from waveql.query_planner import Predicate
-from waveql.exceptions import AdapterError
 
 
 class ConcreteAdapter(BaseAdapter):

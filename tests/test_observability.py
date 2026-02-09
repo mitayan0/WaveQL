@@ -2,7 +2,6 @@
 Tests for WaveQL Observability and EXPLAIN support.
 """
 
-import pytest
 import waveql
 import pyarrow as pa
 from waveql.auth.manager import AuthManager
@@ -68,7 +67,7 @@ def test_explain_servicenow_parsing():
 def test_query_metadata_attachment():
     """Test that adapter-specific query metadata is attached to the plan details."""
     conn = waveql.connect()
-    cursor = conn.cursor()
+    conn.cursor()
     
     # Mock some data with metadata
     data = pa.Table.from_pydict({"a": [1]}, metadata={b"waveql_source_query": b"sysparm_query=active=true"})

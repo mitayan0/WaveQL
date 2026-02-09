@@ -17,6 +17,10 @@ Usage:
 from waveql.connection import WaveQLConnection
 from waveql.cursor import WaveQLCursor
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from waveql.async_connection import AsyncWaveQLConnection
+
 # Exceptions
 from waveql.exceptions import (
     WaveQLError,

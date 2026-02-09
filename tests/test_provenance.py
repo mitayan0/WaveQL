@@ -8,7 +8,6 @@ SQL-over-API federation systems.
 import pytest
 import time
 import threading
-from datetime import datetime
 
 from waveql.provenance import (
     enable_provenance,

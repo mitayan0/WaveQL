@@ -9,9 +9,8 @@ PostgreSQL Type OIDs: https://github.com/postgres/postgres/blob/master/src/inclu
 from __future__ import annotations
 import struct
 import json
-from datetime import date, datetime, time, timedelta
-from decimal import Decimal
-from typing import Any, Dict, Optional, Tuple, Union
+from datetime import date, datetime, time
+from typing import Any, Dict, Optional, Tuple
 from dataclasses import dataclass
 
 import pyarrow as pa

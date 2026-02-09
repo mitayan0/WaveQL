@@ -6,12 +6,9 @@ This covers the 65% uncovered module waveql/cursor.py
 
 import pytest
 import pyarrow as pa
-from unittest.mock import MagicMock, patch, PropertyMock
-import re
+from unittest.mock import MagicMock
 
 from waveql.cursor import WaveQLCursor, Row
-from waveql.query_planner import Predicate
-from waveql.exceptions import QueryError
 
 
 class TestRowClass:
@@ -327,7 +324,7 @@ class TestWaveQLCursorStreamBatches:
         def callback(fetched, total):
             progress.append(fetched)
         
-        batches = list(cursor_with_adapter.stream_batches(
+        list(cursor_with_adapter.stream_batches(
             "SELECT * FROM test.data",
             batch_size=10,
             max_records=20,
@@ -372,7 +369,7 @@ class TestWaveQLCursorStreamToFile:
         """Test streaming to Parquet file."""
         output_file = str(tmp_path / "output.parquet")
         
-        stats = cursor_for_file.stream_to_file(
+        cursor_for_file.stream_to_file(
             "SELECT * FROM test.data",
             output_path=output_file,
             batch_size=10,

@@ -5,12 +5,12 @@ SQL Adapter - Pass-through support for SQL databases via SQLAlchemy
 from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
 import sqlalchemy as sa
-from sqlalchemy.engine import Engine, URL
+from sqlalchemy.engine import Engine
 import pandas as pd
 import pyarrow as pa
 
 from waveql.adapters.base import BaseAdapter
-from waveql.exceptions import AdapterError, QueryError
+from waveql.exceptions import QueryError
 from waveql.schema_cache import ColumnInfo
 
 if TYPE_CHECKING:

@@ -13,7 +13,6 @@ import base64
 import time
 import pytest
 import responses
-from unittest.mock import Mock, patch
 
 from waveql.auth import (
     AuthManager,

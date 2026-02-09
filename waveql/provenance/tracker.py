@@ -390,7 +390,6 @@ def attach_provenance(table: "pa.Table", provenance: QueryProvenance) -> "pa.Tab
     Returns:
         New PyArrow table with provenance in metadata
     """
-    import pyarrow as pa
     
     # Serialize provenance to JSON
     provenance_json = json.dumps(provenance.to_dict())

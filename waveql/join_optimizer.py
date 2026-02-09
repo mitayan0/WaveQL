@@ -19,7 +19,7 @@ import logging
 import time
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Dict, List, Tuple, TYPE_CHECKING
 from collections import defaultdict
 import math
 

@@ -2,7 +2,6 @@
 Tests for Query Optimizer - Complex Predicate Extraction and Subquery Pushdown
 """
 
-import pytest
 from waveql.query_planner import QueryPlanner, Predicate
 from waveql.optimizer import (
     QueryOptimizer,

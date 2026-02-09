@@ -158,20 +158,7 @@ class ServiceNowCDCProvider(BaseCDCProvider):
         
         config = config or CDCConfig()
         
-        # Build query for changes
-        query_parts = []
-        if since:
-            # ServiceNow datetime format
-            since_str = since.strftime("%Y-%m-%d %H:%M:%S")
-            query_parts.append(f"sys_updated_on>{since_str}")
-        
-        # Add any custom filters
-        for key, value in config.filters.items():
-            query_parts.append(f"{key}={value}")
-        
-        sysparm_query = "^".join(query_parts) if query_parts else ""
-        
-        # Fetch changes via adapter
+        # Build predicates for changes
         from waveql.query_planner import Predicate
         
         predicates = []
@@ -180,6 +167,14 @@ class ServiceNowCDCProvider(BaseCDCProvider):
                 column=config.sync_column,
                 operator=">",
                 value=since.isoformat()
+            ))
+        
+        # Add any custom filters as predicates so they are pushed down to ServiceNow.
+        for key, value in config.filters.items():
+            predicates.append(Predicate(
+                column=key,
+                operator="=",
+                value=value,
             ))
         
         # Run in thread since adapter.fetch is sync

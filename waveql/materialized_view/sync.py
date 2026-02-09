@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Optional, Tuple
 
 import pyarrow as pa
 
-from waveql.materialized_view.models import SyncState, ViewDefinition, RefreshStrategy
+from waveql.materialized_view.models import SyncState, ViewDefinition
 from waveql.query_planner import Predicate
 
 if TYPE_CHECKING:

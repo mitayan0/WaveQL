@@ -17,25 +17,24 @@ class TestIsWasm:
         from waveql.utils.wasm import is_wasm
         
         with patch.object(sys, 'platform', 'emscripten'):
-            assert is_wasm() == True
+            assert is_wasm()
     
     def test_is_wasm_wasi_platform(self):
         """Test detection of wasi platform."""
         from waveql.utils.wasm import is_wasm
         
         with patch.object(sys, 'platform', 'wasi'):
-            assert is_wasm() == True
+            assert is_wasm()
     
     def test_is_wasm_js_platform(self):
         """Test detection of js platform."""
         from waveql.utils.wasm import is_wasm
         
         with patch.object(sys, 'platform', 'js'):
-            assert is_wasm() == True
+            assert is_wasm()
     
     def test_is_wasm_with_pyodide_module(self):
         """Test detection via pyodide module."""
-        from waveql.utils.wasm import is_wasm
         
         # Create a fake pyodide module
         fake_pyodide = MagicMock()
@@ -47,7 +46,7 @@ class TestIsWasm:
                 import waveql.utils.wasm as wasm_module
                 importlib.reload(wasm_module)
                 # After reload, pyodide should be detected
-                result = wasm_module.is_wasm()
+                wasm_module.is_wasm()
                 # Restore
                 importlib.reload(wasm_module)
     
@@ -67,7 +66,7 @@ class TestIsWasm:
         # Standard test - should return False on normal systems
         result = is_wasm()
         # On a normal test environment, this should be False
-        assert result == False
+        assert not result
 
 
 class TestEnsureWasmCompatibility:
@@ -75,7 +74,7 @@ class TestEnsureWasmCompatibility:
     
     def test_ensure_wasm_compatibility_non_wasm(self):
         """Test that nothing happens on non-WASM platforms."""
-        from waveql.utils.wasm import ensure_wasm_compatibility, is_wasm
+        from waveql.utils.wasm import ensure_wasm_compatibility
         
         with patch('waveql.utils.wasm.is_wasm', return_value=False):
             # Should return early without doing anything

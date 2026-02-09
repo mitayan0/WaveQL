@@ -26,7 +26,6 @@ Features Tested:
 14. Multiple access patterns (Row, DataFrame, Arrow)
 """
 
-import os
 import sys
 from pathlib import Path
 from datetime import datetime
@@ -66,7 +65,7 @@ def setup_test_data():
             "quarter": ["Q1", "Q1", "Q2", "Q2", "Q3", "Q3", "Q4", "Q4"],
         })
         pq.write_table(sales_data, DATA_DIR / "sales.parquet")
-        print(f"  ✓ Created: sales.parquet (8 rows)")
+        print("  ✓ Created: sales.parquet (8 rows)")
     except Exception as e:
         print(f"  ⚠ Parquet creation failed: {e}")
     
@@ -83,7 +82,7 @@ def setup_test_data():
             "annual_revenue": [5000000, 1200000, 3500000, 250000, 50000000],
         })
         customers_df.to_excel(DATA_DIR / "customers.xlsx", index=False)
-        print(f"  ✓ Created: customers.xlsx (5 rows)")
+        print("  ✓ Created: customers.xlsx (5 rows)")
     except Exception as e:
         print(f"  ⚠ Excel creation failed: {e}")
     
@@ -342,8 +341,7 @@ def test_cross_file_join():
     # For cross-file JOINs, we use DuckDB directly since it can read multiple files
     import duckdb
     
-    orders_path = DATA_DIR / 'orders.csv'
-    employees_path = DATA_DIR / 'employees.csv'
+    employees_path = DATA_DIR / "employees.csv"
     
     # Create a lookup CSV for department budgets
     dept_budget_path = DATA_DIR / 'dept_budget.csv'

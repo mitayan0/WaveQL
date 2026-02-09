@@ -6,8 +6,7 @@ This covers the 45% uncovered module waveql/adapters/shopify.py
 
 import pytest
 import pyarrow as pa
-from unittest.mock import MagicMock, patch, AsyncMock
-from datetime import datetime
+from unittest.mock import MagicMock, patch
 
 from waveql.adapters.shopify import ShopifyAdapter
 from waveql.query_planner import Predicate
@@ -271,7 +270,7 @@ class TestShopifyAdapterGraphQL:
             mock_httpx.Client.return_value.__enter__ = MagicMock(return_value=mock_httpx)
             mock_httpx.Client.return_value.__exit__ = MagicMock()
             
-            adapter = ShopifyAdapter(
+            ShopifyAdapter(
                 host="mystore.myshopify.com",
                 api_key="test-key",
                 password="test-pass",

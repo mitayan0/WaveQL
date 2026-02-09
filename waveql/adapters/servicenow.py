@@ -9,11 +9,9 @@ Features:
 """
 
 from __future__ import annotations
-import json
 import logging
 from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 
-import requests
 import httpx
 import pyarrow as pa
 
@@ -349,7 +347,7 @@ class ServiceNowAdapter(BaseAdapter):
             return pa.table({f.name: [] for f in fields})
         
         # Use new schema utility for proper struct conversion
-        from waveql.utils.schema import records_to_arrow_table, infer_schema_from_records
+        from waveql.utils.schema import records_to_arrow_table
         
         # Build schema from ColumnInfo (which now includes Arrow types)
         schema_fields = []
@@ -605,10 +603,6 @@ class ServiceNowAdapter(BaseAdapter):
         except httpx.HTTPError as e:
             raise AdapterError(f"ServiceNow request failed (async): {e}")
 
-
-        self._cache_schema(table, columns)
-        return columns
-
     async def _get_or_discover_schema_async(self, table: str, records: List[Dict]) -> List[ColumnInfo]:
         """Get cached schema or discover from response (async)."""
         cached = self._get_cached_schema(table)
@@ -640,8 +634,6 @@ class ServiceNowAdapter(BaseAdapter):
             ))
         
         self._cache_schema(table, columns)
-        return columns
-
         return columns
 
     def _get_or_discover_schema(self, table: str, records: List[Dict]) -> List[ColumnInfo]:
@@ -810,10 +802,6 @@ class ServiceNowAdapter(BaseAdapter):
 
             return list(columns_map.values())
 
-        except Exception as e:
-            logger.warning("Failed to fetch metadata from sys_dictionary for %s: %s", table_name, e)
-            return None
-            
         except Exception as e:
             logger.warning("Failed to fetch metadata from sys_dictionary for %s: %s", table_name, e)
             return None

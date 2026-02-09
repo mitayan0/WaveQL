@@ -11,7 +11,7 @@ Features:
 
 from __future__ import annotations
 import logging
-from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
+from typing import Any, Dict, List, Sequence, TYPE_CHECKING
 import pyarrow as pa
 import anyio
 
@@ -493,7 +493,7 @@ class HubSpotAdapter(BaseAdapter):
                         try:
                             error_data = response.json()
                             message = error_data.get("message", response.text)
-                        except:
+                        except (ValueError, KeyError):
                             message = response.text
                         raise AdapterError(f"HubSpot API error ({response.status_code}): {message}")
                     return response

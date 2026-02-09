@@ -5,7 +5,7 @@ WaveQL Connection - DB-API 2.0 compliant connection class
 from __future__ import annotations
 import logging
 import os
-from typing import Any, Dict, Optional, Union, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
 
 import duckdb
 
@@ -16,11 +16,17 @@ from waveql.connection_base import ConnectionMixin
 from waveql.cache import QueryCache, CacheConfig, CacheStats, create_cache
 
 if TYPE_CHECKING:
+    from datetime import datetime
     from waveql.cursor import WaveQLCursor
     from waveql.adapters.base import BaseAdapter
     from waveql.materialized_view.manager import MaterializedViewManager
+    from waveql.schema_cache import ColumnInfo
+    from waveql.semantic.views import VirtualViewRegistry
+    from waveql.semantic.saved_queries import SavedQuery
+    from waveql.semantic.dbt import DbtManifest
+    from waveql.contracts.models import RelationshipContract
 
-from waveql.security.policy import PolicyManager, SecurityPolicy, PolicyMode
+from waveql.security.policy import PolicyManager, SecurityPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -643,7 +649,6 @@ class WaveQLConnection(ConnectionMixin):
         Returns:
             List of ColumnInfo objects
         """
-        from waveql.schema_cache import ColumnInfo
         
         if "." in table:
             adapter_name, table_name = table.split(".", 1)
@@ -691,7 +696,6 @@ class WaveQLConnection(ConnectionMixin):
             cursor.execute("SELECT * FROM my_view")
             ```
         """
-        from waveql.semantic.views import VirtualViewRegistry
         
         count = 0
         for view in registry.get_ordered_views():
@@ -800,7 +804,6 @@ class WaveQLConnection(ConnectionMixin):
             results = cursor.fetchall()
             ```
         """
-        from waveql.semantic.saved_queries import SavedQuery
         
         rendered_sql = query.render(**params)
         cursor = self.cursor()
@@ -838,7 +841,6 @@ class WaveQLConnection(ConnectionMixin):
             cursor.execute("SELECT * FROM stg_customers")
             ```
         """
-        from waveql.semantic.dbt import DbtManifest
         
         registry = manifest.to_view_registry(
             include_ephemeral=include_ephemeral,

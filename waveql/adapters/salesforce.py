@@ -4,10 +4,8 @@ Salesforce Adapter - Query Salesforce using SOQL via REST API
 
 from __future__ import annotations
 import logging
-import urllib.parse
 from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 import requests
-import httpx
 import pyarrow as pa
 
 from waveql.adapters.base import BaseAdapter
@@ -686,7 +684,7 @@ class SalesforceAdapter(BaseAdapter):
             # Try to abort job if something failed
             try:
                 self._request("PATCH", f"{url}{job_id}/", json={"state": "Aborted"})
-            except:
+            except Exception:
                 pass
             raise e
 

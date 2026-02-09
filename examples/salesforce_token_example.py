@@ -47,7 +47,7 @@ def main():
     token_url = f"{SF_HOST}/services/oauth2/token"
     
     print(f"Connecting to {SF_HOST}...")
-    print(f"Using existing access token")
+    print("Using existing access token")
     
     try:
         # Connect using existing access token (and refresh token for auto-refresh)

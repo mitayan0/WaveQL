@@ -15,7 +15,6 @@ from waveql.query_planner import QueryPlanner, Predicate
 from waveql.schema_cache import SchemaCache, ColumnInfo
 from waveql.adapters.base import BaseAdapter
 from waveql.connection_base import ConnectionMixin
-from typing import Any, List
 
 
 class TestQueryPlanner:
@@ -485,10 +484,6 @@ class TestExceptions:
             ConnectionError,
             AuthenticationError,
             QueryError,
-            AdapterError,
-            SchemaError,
-            RateLimitError,
-            PredicatePushdownError,
             ConfigurationError,
             TimeoutError,
         )

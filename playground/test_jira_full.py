@@ -149,7 +149,7 @@ def test_order_by(cursor):
     """)
     
     rows = cursor.fetchall()
-    print(f"  Recent issues (by created date):")
+    print("  Recent issues (by created date):")
     for row in rows:
         created = safe_get(row, 'created', 'N/A')
         if isinstance(created, str) and len(created) > 10:
@@ -529,7 +529,7 @@ def test_contracts(cursor, conn):
     
     # Validate a query result against the contract
     cursor.execute("SELECT key, summary, status FROM issue LIMIT 5")
-    results = cursor.fetchall()
+    cursor.fetchall()
     
     print(f"  Contract '{contract.table}' defined with {len(contract.columns)} columns")
     print("  ✓ Data contracts configuration works")

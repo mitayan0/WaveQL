@@ -68,14 +68,14 @@ def test_servicenow_with_budget():
     stats = estimator.get_stats("servicenow", "incident")
     
     if stats:
-        print(f"\n[Stats] Learned Statistics for servicenow.incident:")
+        print("\n[Stats] Learned Statistics for servicenow.incident:")
         print(f"   Sample count: {stats.sample_count}")
         print(f"   Avg rows: {stats.avg_rows:.0f}")
         print(f"   Min/Max: {stats.min_rows} / {stats.max_rows}")
     
     # Test 1c: Estimate future query cardinality
     est_rows, lower, upper = estimator.estimate_cardinality("servicenow", "incident")
-    print(f"\n[Estimate] Cardinality Estimate (no predicates):")
+    print("\n[Estimate] Cardinality Estimate (no predicates):")
     print(f"   Estimated rows: {est_rows:.0f}")
     print(f"   Range: [{lower:.0f}, {upper:.0f}]")
     
@@ -127,7 +127,7 @@ def test_salesforce_adaptive_pagination():
     stats = estimator.get_stats("salesforce", "Account")
     
     if stats:
-        print(f"\n[Stats] Learned Statistics for salesforce.Account:")
+        print("\n[Stats] Learned Statistics for salesforce.Account:")
         print(f"   Sample count: {stats.sample_count}")
         print(f"   Avg rows: {stats.avg_rows:.0f}")
     
@@ -135,7 +135,7 @@ def test_salesforce_adaptive_pagination():
     pagination = get_adaptive_pagination()
     state = pagination.get_state("salesforce", "Account")
     
-    print(f"\n[Pagination] Adaptive Pagination State:")
+    print("\n[Pagination] Adaptive Pagination State:")
     print(f"   Current page size: {state.page_size}")
     print(f"   State: {state.state.value}")
     print(f"   Avg throughput: {state.avg_throughput:.1f} rows/s")
@@ -166,7 +166,7 @@ def test_budget_feasibility():
     budget_tight = QueryBudget(value=100, unit=BudgetUnit.MILLISECONDS)
     result_tight = planner.estimate_feasibility(budget_tight, "demo", "large_table")
     
-    print(f"\n[Budget] 100ms")
+    print("\n[Budget] 100ms")
     print(f"   Is feasible: {result_tight['is_feasible']}")
     print(f"   Estimated cost: {result_tight['estimated_cost']*1000:.1f}ms")
     if result_tight.get('suggested_limit'):
@@ -175,7 +175,7 @@ def test_budget_feasibility():
     budget_loose = QueryBudget(value=5000, unit=BudgetUnit.MILLISECONDS)
     result_loose = planner.estimate_feasibility(budget_loose, "demo", "large_table")
     
-    print(f"\n[Budget] 5000ms")
+    print("\n[Budget] 5000ms")
     print(f"   Is feasible: {result_loose['is_feasible']}")
     print(f"   Estimated cost: {result_loose['estimated_cost']*1000:.1f}ms")
     

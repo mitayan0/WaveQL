@@ -2,7 +2,6 @@
 import sys
 import pytest
 from unittest.mock import patch, MagicMock
-from io import StringIO
 import pyarrow as pa
 from waveql.cli import main
 

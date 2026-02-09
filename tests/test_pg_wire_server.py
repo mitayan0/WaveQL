@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import struct
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch, PropertyMock
+from unittest.mock import MagicMock, AsyncMock, patch
 import pyarrow as pa
 
 from waveql.pg_wire.server import PGWireSession, PGWireServer, run_server
@@ -16,7 +16,6 @@ from waveql.pg_wire.protocol import (
     MessageType,
     FrontendMessageType,
     TransactionStatus,
-    ProtocolError,
 )
 
 
